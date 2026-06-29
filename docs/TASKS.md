@@ -22,7 +22,7 @@
 ## Milestone 2 — Engine: Stage 0 & 1
 - [ ] **T2.1** `Enumerator` (Stage 0): walk roots, apply scope + ignore + hidden rules, compute signatures, size-bucket. DoD: enumerates a fixture tree correctly.
 - [ ] **T2.2** Streamed SHA-256 hasher (Stage 1) + exact grouping (union-find). DoD: F3 acceptance + memory-bounded test.
-- [ ] **T2.3** `ScanCoordinator` actor emitting `ScanEvent` `AsyncStream`, cancellation, incremental persistence. DoD: cancel-at-50% consistency test passes.
+- [x] **T2.3** `ScanCoordinator` actor emitting `ScanEvent` `AsyncStream`, cancellation, incremental persistence. DoD: cancel-at-50% consistency test passes.
 
 ## Milestone 3 — Engine: Stage 2 (the headline)
 - [ ] **T3.1** Text extractors: txt/md/rtf normalization; `.docx` via vendored unzip+XML. DoD: extract fixtures to normalized text.
