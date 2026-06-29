@@ -6,7 +6,14 @@ import Foundation
 public actor InMemoryIndexStore: IndexStoring {
     private var sourcesByID: [Int64: SourceBookmark] = [:]
     private var filesByID: [Int64: FileRecord] = [:]
-    private var groupsByID: [Int64: (group: DuplicateGroup, members: [Int64], edges: [MatchEdge], sessionID: Int64)] = [:]
+    private struct StoredGroup {
+        var group: DuplicateGroup
+        var members: [Int64]
+        var edges: [MatchEdge]
+        var sessionID: Int64
+    }
+
+    private var groupsByID: [Int64: StoredGroup] = [:]
     private var embeddingsByID: [Int64: Embedding] = [:]
     private var sessionsByID: [Int64: ScanSession] = [:]
     private var ignored: Set<Pair> = []
@@ -83,7 +90,7 @@ public actor InMemoryIndexStore: IndexStoring {
             ignored: group.ignored,
             createdAt: group.createdAt
         )
-        groupsByID[id] = (g, members, edges, 0)
+        groupsByID[id] = StoredGroup(group: g, members: members, edges: edges, sessionID: 0)
         return id
     }
 

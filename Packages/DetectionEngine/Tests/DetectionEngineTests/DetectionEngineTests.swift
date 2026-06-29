@@ -6,7 +6,7 @@ import XCTest
 final class DetectionEngineTests: XCTestCase {
     func testStreamedHashMatchesKnownValue() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try try XCTUnwrap("hello".data(using: .utf8)?.write(to: tmp))
+        try Data("hello".utf8).write(to: tmp)
         defer { try? FileManager.default.removeItem(at: tmp) }
         let digest = try Hasher256.hash(fileAt: tmp)
         // SHA-256("hello")
@@ -66,7 +66,7 @@ final class DetectionEngineTests: XCTestCase {
 
     private func write(_ text: String, _ name: String, in dir: URL) throws -> URL {
         let url = dir.appendingPathComponent(name)
-        try text.data(using: .utf8)!.write(to: url) // SAFETY: ASCII literal always UTF-8 encodable (test-only)
+        try Data(text.utf8).write(to: url)
         return url
     }
 
