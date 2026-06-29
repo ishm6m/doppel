@@ -1,0 +1,59 @@
+# XcodeGen spec — generates Doppel.xcodeproj deterministically.
+# Why: a hand-written .pbxproj is fragile and merge-hostile; generating it keeps the repo clean
+# and lets Claude Code modify project structure by editing this YAML, not binary plist guts.
+#
+# Usage:
+#   brew install xcodegen
+#   xcodegen generate
+#   open Doppel.xcodeproj
+
+name: Doppel
+options:
+  bundleIdPrefix: com.doppel
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_ENTITLEMENTS: App/Doppel/Resources/Doppel.entitlements
+    PRODUCT_NAME: Doppel
+    PRODUCT_BUNDLE_IDENTIFIER: com.doppel.app
+    GENERATE_INFOPLIST_FILE: YES
+    INFOPLIST_KEY_NSHumanReadableCopyright: ""
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+packages:
+  DoppelKit:
+    path: Packages/DoppelKit
+  IndexStore:
+    path: Packages/IndexStore
+  DetectionEngine:
+    path: Packages/DetectionEngine
+
+targets:
+  Doppel:
+    type: application
+    platform: macOS
+    sources:
+      - path: App/Doppel
+    dependencies:
+      - package: DoppelKit
+      - package: IndexStore
+      - package: DetectionEngine
+    settings:
+      base:
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+
+  DoppelUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: App/DoppelUITests
+    dependencies:
+      - target: Doppel

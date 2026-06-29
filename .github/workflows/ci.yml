@@ -1,0 +1,30 @@
+name: CI
+
+# The real test/lint gate. Local dev only has CommandLine Tools (no XCTest, no
+# lint binaries), so this is where `swift test` + lint actually run.
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build & test packages
+        run: |
+          set -e
+          for pkg in DoppelKit IndexStore DetectionEngine; do
+            echo "::group::$pkg"
+            swift build --package-path "Packages/$pkg"
+            swift test  --package-path "Packages/$pkg"
+            echo "::endgroup::"
+          done
+
+      - name: Lint
+        run: |
+          set -e
+          brew install swiftformat swiftlint
+          swiftformat --lint .
+          swiftlint --strict
