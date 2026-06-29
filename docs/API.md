@@ -15,17 +15,18 @@ public protocol ScanCoordinating: Sendable {
     /// Starts a scan; returns a stream of events. Cancelling the Task cancels the scan.
     func scan(_ request: ScanRequest) -> AsyncThrowingStream<ScanEvent, Error>
 
+    // M3+ — NOT YET IMPLEMENTED. The shipped protocol has `scan` only (see Contracts.swift).
     /// Runs the opt-in semantic stage over a finished scan's survivors.
     func deepScan(sessionID: Int64) -> AsyncThrowingStream<ScanEvent, Error>
-
     /// Runs OCR over needsOCR files then re-fingerprints.
     func runOCR(sessionID: Int64) -> AsyncThrowingStream<ScanEvent, Error>
 }
 
 public struct ScanRequest: Sendable {
-    public var roots: [SourceBookmark]
+    public var roots: [URL]          // app resolves security-scoped bookmarks -> URLs before calling the engine
     public var scopes: Set<FileTypeScope>
     public var config: DetectionConfig
+    public var knownSignatures: Set<FileSignature>   // incremental re-scan: signatures the store already has
 }
 
 public struct DetectionConfig: Sendable {
@@ -51,7 +52,6 @@ public enum ScanPhase: String, Sendable {
 }
 
 public struct ScanSummary: Sendable {
-    public var sessionID: Int64
     public var filesDiscovered: Int
     public var groupsFound: Int
     public var bytesReclaimable: Int64
@@ -61,8 +61,9 @@ public struct ScanSummary: Sendable {
 
 **Contract notes**
 - Events are emitted in stage order; `groupFound` may arrive interleaved as stages complete.
-- The coordinator persists to `IndexStoring` before emitting `finished`; a crash loses ≤ the in-flight batch.
 - Cancellation always yields a `.cancelled(partial:)` with a consistent index.
+
+**Session ownership (decided 2026-06-29).** The **app-side `ScanService` owns session lifecycle, not the engine.** The `DetectionEngine` is pure (no IndexStore import — see Contracts.swift): it cannot allocate a DB-backed session id, and its `FileRecord.id`s are scan-local counters that would collide with DB ids. So `ScanService` calls `createSession(...)` to get the real `sessionID` *before* the scan, holds it, tags each persisted group with it on `.groupFound`, and `updateSession(...)` on `.finished`. Consequently `ScanSummary` carries **no** `sessionID` — the engine never knows it. **Deferred until `ScanService` exists** (no app target yet): `IndexStoring.saveGroup` gains a `sessionID:` parameter and GRDBIndexStore drops the `scan_session(id:0)` sentinel.
 
 ---
 
