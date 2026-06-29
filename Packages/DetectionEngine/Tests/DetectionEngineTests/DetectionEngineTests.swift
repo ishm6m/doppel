@@ -70,26 +70,30 @@ final class DetectionEngineTests: XCTestCase {
         return url
     }
 
-    func testIdenticalFilesFormOneExactGroup() async throws {
+    /// Names of files an edge connects, looked up in the stage's emitted records.
+    private func edgeNames(_ edge: StageEdge, _ records: [FileRecord]) -> Set<String> {
+        Set(records.filter { [edge.pair.a, edge.pair.b].contains($0.id) }.map(\.displayName))
+    }
+
+    func testIdenticalFilesProduceOneExactEdge() async throws {
         let dir = try makeTree(); defer { try? FileManager.default.removeItem(at: dir) }
         _ = try write("the same contract", "a.txt", in: dir)
         _ = try write("the same contract", "copy-of-a.txt", in: dir)
 
         let stage0 = FileEnumerator(scopes: [.document]).enumerate(roots: [dir])
-        let (groups, skipped) = await ExactGrouper().group(stage0.exactCandidateBuckets())
+        let out = await ExactGrouper().group(stage0.exactCandidateBuckets())
 
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertTrue(skipped.isEmpty)
-        let g = groups[0]
-        XCTAssertEqual(g.group.matchType, .exact)
-        XCTAssertEqual(g.group.confidence, 1.0)
-        XCTAssertEqual(g.group.explanation, "Identical file contents")
-        XCTAssertEqual(Set(g.members.map(\.displayName)), ["a.txt", "copy-of-a.txt"])
-        XCTAssertTrue(g.members.contains { $0.id == g.group.keeperFileID })
-        XCTAssertTrue(g.members.allSatisfy { $0.sha256 != nil })
+        XCTAssertTrue(out.skipped.isEmpty)
+        XCTAssertEqual(out.edges.count, 1)
+        let e = out.edges[0]
+        XCTAssertEqual(e.type, .exact)
+        XCTAssertEqual(e.score, 1.0)
+        XCTAssertEqual(e.reason, "Identical file contents")
+        XCTAssertEqual(edgeNames(e, out.records), ["a.txt", "copy-of-a.txt"])
+        XCTAssertTrue(out.records.allSatisfy { $0.sha256 != nil }, "hashed records carry their digest")
     }
 
-    func testSizeUniqueFileIsNeverHashedAndFormsNoGroup() async throws {
+    func testSizeUniqueFileIsNeverHashedAndFormsNoEdge() async throws {
         let dir = try makeTree(); defer { try? FileManager.default.removeItem(at: dir) }
         _ = try write("aaaa", "a.txt", in: dir)
         _ = try write("aaaa", "b.txt", in: dir) // collides with a.txt on size
@@ -98,11 +102,11 @@ final class DetectionEngineTests: XCTestCase {
         let stage0 = FileEnumerator(scopes: [.document]).enumerate(roots: [dir])
         let log = HashLog()
         let grouper = ExactGrouper(hash: { url in log.record(url); return try Hasher256.hash(fileAt: url) })
-        let (groups, _) = await grouper.group(stage0.exactCandidateBuckets())
+        let out = await grouper.group(stage0.exactCandidateBuckets())
 
-        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(out.edges.count, 1)
         XCTAssertFalse(log.paths.contains(lone.path), "size-unique file must never be hashed")
-        XCTAssertFalse(groups.contains { $0.members.contains { $0.displayName == "lone.txt" } })
+        XCTAssertFalse(out.records.contains { $0.displayName == "lone.txt" })
     }
 
     func testUnreadableFileIsSkippedAndScanContinues() async throws {
@@ -114,26 +118,26 @@ final class DetectionEngineTests: XCTestCase {
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: secret.path) }
 
         let stage0 = FileEnumerator(scopes: [.document]).enumerate(roots: [dir])
-        let (groups, skipped) = await ExactGrouper().group(stage0.exactCandidateBuckets())
+        let out = await ExactGrouper().group(stage0.exactCandidateBuckets())
 
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(Set(groups[0].members.map(\.displayName)), ["a.txt", "b.txt"])
-        let allSkipped = stage0.skipped + skipped
+        XCTAssertEqual(out.edges.count, 1)
+        XCTAssertEqual(edgeNames(out.edges[0], out.records), ["a.txt", "b.txt"])
+        let allSkipped = stage0.skipped + out.skipped
         XCTAssertTrue(allSkipped.contains { $0.0.displayName == "secret.txt" })
     }
 
-    func testZeroByteFilesGroupSanely() async throws {
+    func testZeroByteFilesEdgeSanely() async throws {
         let dir = try makeTree(); defer { try? FileManager.default.removeItem(at: dir) }
         _ = try write("", "empty1.txt", in: dir)
         _ = try write("", "empty2.txt", in: dir)
         _ = try write("not empty", "full.txt", in: dir)
 
         let stage0 = FileEnumerator(scopes: [.document]).enumerate(roots: [dir])
-        let (groups, skipped) = await ExactGrouper().group(stage0.exactCandidateBuckets())
+        let out = await ExactGrouper().group(stage0.exactCandidateBuckets())
 
-        XCTAssertTrue(skipped.isEmpty)
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(Set(groups[0].members.map(\.displayName)), ["empty1.txt", "empty2.txt"])
+        XCTAssertTrue(out.skipped.isEmpty)
+        XCTAssertEqual(out.edges.count, 1)
+        XCTAssertEqual(edgeNames(out.edges[0], out.records), ["empty1.txt", "empty2.txt"])
     }
 
     func testHashingIsMemoryBounded() {
