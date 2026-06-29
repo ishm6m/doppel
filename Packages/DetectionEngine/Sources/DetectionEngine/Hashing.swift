@@ -45,9 +45,14 @@ public struct UnionFind {
     public mutating func union(_ a: Int, _ b: Int) {
         let ra = find(a), rb = find(b)
         guard ra != rb else { return }
-        if rank[ra] < rank[rb] { parent[ra] = rb }
-        else if rank[ra] > rank[rb] { parent[rb] = ra }
-        else { parent[rb] = ra; rank[ra] += 1 }
+        if rank[ra] < rank[rb] {
+            parent[ra] = rb
+        } else if rank[ra] > rank[rb] {
+            parent[rb] = ra
+        } else {
+            parent[rb] = ra
+            rank[ra] += 1
+        }
     }
 
     public mutating func groups() -> [[Int]] {

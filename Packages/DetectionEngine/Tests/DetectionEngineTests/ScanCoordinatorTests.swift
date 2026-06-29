@@ -12,7 +12,7 @@ final class ScanCoordinatorTests: XCTestCase {
     @discardableResult
     private func write(_ text: String, _ name: String, in dir: URL) throws -> URL {
         let url = dir.appendingPathComponent(name)
-        try text.data(using: .utf8)!.write(to: url) // SAFETY: ASCII literal always UTF-8 encodable (test-only)
+        try Data(text.utf8).write(to: url)
         return url
     }
 
