@@ -15,9 +15,9 @@ public struct PlainTextExtractor: ContentExtractor {
     }
 
     public func extract(_ url: URL) async throws -> ExtractedContent {
-        // ponytail: utf8, lossy fallback for stray encodings — good enough for shingling.
-        let raw = try (try? String(contentsOf: url, encoding: .utf8))
-            ?? String(decoding: Data(contentsOf: url), as: UTF8.self)
+        // ponytail: utf8 only. Non-utf8 text files throw here → the coordinator skips them
+        // (.decodeFailed). Rare for txt/md; add encoding detection if real files need it.
+        let raw = try String(contentsOf: url, encoding: .utf8)
         return ExtractedContent(normalizedText: Self.normalize(raw), contentKind: .text, needsOCR: false)
     }
 
