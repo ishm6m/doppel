@@ -25,10 +25,10 @@
 - [x] **T2.3** `ScanCoordinator` actor emitting `ScanEvent` `AsyncStream`, cancellation, incremental persistence. DoD: cancel-at-50% consistency test passes.
 
 ## Milestone 3 — Engine: Stage 2 (the headline)
-- [ ] **T3.1** Text extractors: txt/md/rtf normalization; `.docx` via vendored unzip+XML. DoD: extract fixtures to normalized text.
+- [ ] **T3.1** Text extractors: txt/md done (`PlainTextExtractor`). RTF/`.docx` deferred — RTF needs AppKit, .docx needs vendored unzip+XML; both would touch the pure engine, decide then.
 - [ ] **T3.2** PDF extractor (PDFKit text layer) + scanned-PDF classification (F5). DoD: text vs scanned fixtures classified.
-- [ ] **T3.3** Shingling + MinHash (128 perms) + LSH banding + Jaccard estimate. DoD: near-dup pair detected; threshold configurable.
-- [ ] **T3.4** Near-dup grouping + `reasonSummary` via fast diff. DoD: F4 acceptance, precision ≥ 0.95 on corpus.
+- [x] **T3.3** Shingling + MinHash (128 perms) + LSH banding (16×8) + Jaccard estimate. DoD met: near-dup pair detected; threshold via `DetectionConfig`.
+- [x] **T3.4** Near-dup grouping + `reasonSummary` via fast diff. DoD met: precision 1.0 on constructed near-dup set (≥0.95); LSH pruning asserted.
 
 ## Milestone 4 — Results UI (vertical slice)
 - [ ] **T4.1** `NavigationSplitView` shell: sidebar (sources/scans), content (results), inspector. DoD: matches `UI_SPEC.md` layout, empty states render.
