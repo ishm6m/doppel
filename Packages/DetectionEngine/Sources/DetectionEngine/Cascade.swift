@@ -126,34 +126,45 @@ public struct ExactGrouper: Sendable {
     public func group(_ buckets: [[EnumeratedFile]]) async -> (groups: [ResolvedGroup], skipped: [(FileRecord, FileIssue)]) {
         var groups: [ResolvedGroup] = []
         var skipped: [(FileRecord, FileIssue)] = []
-
         for bucket in buckets {
-            var hashed: [(file: EnumeratedFile, digest: Data)] = []
-            for (file, outcome) in await hashBucket(bucket) {
-                switch outcome {
-                case .ok(let digest): hashed.append((file, digest))
-                case .fail(let message): skipped.append((file.record, FileIssue(kind: .unreadable, message: message)))
-                }
-            }
+            let r = await group(bucket: bucket)
+            groups += r.groups
+            skipped += r.skipped
+        }
+        return (groups, skipped)
+    }
 
-            // Cluster equal-hash files with the shared UnionFind (one group per identical-content set).
-            var uf = UnionFind(count: hashed.count)
-            var firstForDigest: [Data: Int] = [:]
-            for (i, entry) in hashed.enumerated() {
-                if let j = firstForDigest[entry.digest] { uf.union(i, j) } else { firstForDigest[entry.digest] = i }
+    /// Hash + cluster a single size bucket. The coordinator iterates buckets itself so it can emit
+    /// groups incrementally and honour cancellation between buckets.
+    public func group(bucket: [EnumeratedFile]) async -> (groups: [ResolvedGroup], skipped: [(FileRecord, FileIssue)]) {
+        var groups: [ResolvedGroup] = []
+        var skipped: [(FileRecord, FileIssue)] = []
+
+        var hashed: [(file: EnumeratedFile, digest: Data)] = []
+        for (file, outcome) in await hashBucket(bucket) {
+            switch outcome {
+            case .ok(let digest): hashed.append((file, digest))
+            case .fail(let message): skipped.append((file.record, FileIssue(kind: .unreadable, message: message)))
             }
-            for cluster in uf.groups() where cluster.count > 1 {
-                let members = cluster.map { idx -> FileRecord in
-                    var r = hashed[idx].file.record
-                    r.sha256 = hashed[idx].digest
-                    return r
-                }.sorted { $0.id < $1.id }
-                guard let keeper = KeeperHeuristic.suggestKeeper(from: members) else { continue }
-                let g = DuplicateGroup(id: 0, matchType: .exact, confidence: 1.0,
-                                       explanation: "Identical file contents",
-                                       keeperFileID: keeper.id, memberFileIDs: members.map(\.id))
-                groups.append(ResolvedGroup(group: g, members: members))
-            }
+        }
+
+        // Cluster equal-hash files with the shared UnionFind (one group per identical-content set).
+        var uf = UnionFind(count: hashed.count)
+        var firstForDigest: [Data: Int] = [:]
+        for (i, entry) in hashed.enumerated() {
+            if let j = firstForDigest[entry.digest] { uf.union(i, j) } else { firstForDigest[entry.digest] = i }
+        }
+        for cluster in uf.groups() where cluster.count > 1 {
+            let members = cluster.map { idx -> FileRecord in
+                var r = hashed[idx].file.record
+                r.sha256 = hashed[idx].digest
+                return r
+            }.sorted { $0.id < $1.id }
+            guard let keeper = KeeperHeuristic.suggestKeeper(from: members) else { continue }
+            let g = DuplicateGroup(id: 0, matchType: .exact, confidence: 1.0,
+                                   explanation: "Identical file contents",
+                                   keeperFileID: keeper.id, memberFileIDs: members.map(\.id))
+            groups.append(ResolvedGroup(group: g, members: members))
         }
         return (groups, skipped)
     }

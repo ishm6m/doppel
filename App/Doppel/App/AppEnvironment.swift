@@ -25,9 +25,7 @@ final class AppEnvironment {
     /// Live wiring. The GRDB store path lives in Application Support (DATA_MODEL.md §1).
     static func live() -> AppEnvironment {
         let store: any IndexStoring = makeStore()
-        // ScanCoordinator is implemented starting at T2.3; until then use a placeholder that finishes empty.
-        let coordinator: any ScanCoordinating = PlaceholderCoordinator()
-        return AppEnvironment(store: store, coordinator: coordinator, embedding: StubEmbeddingProvider())
+        return AppEnvironment(store: store, coordinator: ScanCoordinator(), embedding: StubEmbeddingProvider())
     }
 
     static func preview() -> AppEnvironment {

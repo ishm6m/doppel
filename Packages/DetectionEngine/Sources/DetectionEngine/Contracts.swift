@@ -32,10 +32,16 @@ public struct ScanRequest: Sendable {
     public var roots: [URL]                 // already security-scope-resolved by the app layer
     public var scopes: Set<FileTypeScope>
     public var config: DetectionConfig
-    public init(roots: [URL], scopes: Set<FileTypeScope> = [.document], config: DetectionConfig = .init()) {
+    /// Signatures of files the store already knows are unchanged. The app fills this from
+    /// `IndexStoring.unchangedFileIDs(...)`; the engine just skips matches (incremental re-scan)
+    /// without ever importing IndexStore.
+    public var knownSignatures: Set<FileSignature>
+    public init(roots: [URL], scopes: Set<FileTypeScope> = [.document],
+                config: DetectionConfig = .init(), knownSignatures: Set<FileSignature> = []) {
         self.roots = roots
         self.scopes = scopes
         self.config = config
+        self.knownSignatures = knownSignatures
     }
 }
 
