@@ -223,8 +223,9 @@ public actor GRDBIndexStore: IndexStoring {
         try await dbQueue.write { db in
             // ponytail: saveGroup has no sessionID in the protocol, but duplicate_group.scan_id is
             // NOT NULL with an enforced FK (we keep FK on for the source→file cascade). Park groups
-            // under a sentinel session 0, hidden from sessions(). Upgrade path: thread a real
-            // sessionID through saveGroup once the ScanCoordinator (T2.3) owns session lifecycle.
+            // under a sentinel session 0, hidden from sessions(). Upgrade path: ScanService (app-side,
+            // owns session lifecycle — see docs/API.md) threads a real sessionID through saveGroup;
+            // drop the sentinel insert + the `id <> 0` filter in sessions() at that point.
             try db.execute(
                 sql: "INSERT OR IGNORE INTO scan_session (id, started_at, scopes_json, state) VALUES (0, 0, '{}', ?)",
                 arguments: [ScanState.finished.rawValue]

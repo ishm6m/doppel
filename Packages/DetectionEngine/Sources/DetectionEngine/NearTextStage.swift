@@ -42,6 +42,10 @@ public struct NearTextStage: Sendable {
             onCompare?(i, j)
             guard let si = sigs[i], let sj = sigs[j] else { continue }
             let estimate = MinHasher.estimatedJaccard(si, sj)
+            // ponytail: estimated Jaccard can false-negative on SHORT docs near the gate — one
+            // changed token can become the per-perm min across many permutations and drag the
+            // 128-perm estimate below threshold even at true Jaccard ~0.9 (see docs/KNOWN_LIMITATIONS.md).
+            // Upgrade path: exact-Jaccard verify on near-gate candidates, or adaptive perm count.
             if estimate >= config.nearDupTextThreshold {
                 uf.union(i, j)
                 edgeJaccard[pair] = estimate
