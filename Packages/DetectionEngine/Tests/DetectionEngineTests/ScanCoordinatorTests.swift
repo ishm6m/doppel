@@ -87,9 +87,9 @@ final class ScanCoordinatorTests: XCTestCase {
     /// surface as one `.nearText` group, with a `.progress(.fingerprinting)` event emitted.
     func testStage2EmitsNearTextGroupAndFingerprintingProgress() async throws {
         let dir = try makeTree(); defer { try? FileManager.default.removeItem(at: dir) }
-        var words = (0 ..< 120).map { "w\($0)" }
+        var words = (0 ..< 200).map { "w\($0)" }
         try write(words.joined(separator: " "), "contract.txt", in: dir)
-        words[60] = "dated2025"
+        words[100] = "dated2025"
         try write(words.joined(separator: " "), "contract-2025.txt", in: dir)
 
         let events = try await drain(ScanCoordinator().scan(ScanRequest(roots: [dir], scopes: [.document])))
