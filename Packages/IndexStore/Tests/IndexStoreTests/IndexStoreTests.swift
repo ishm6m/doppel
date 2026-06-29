@@ -12,9 +12,11 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
         FileRecord(id: 1, bookmarkID: sid, relativePath: "a.txt", displayName: "a.txt",
                    sizeBytes: 10, mtime: .now, typeScope: .document)
     ])
-    XCTAssertEqual(try await store.sources().count, 1)
+    let sourceCount = try await store.sources().count
+    XCTAssertEqual(sourceCount, 1)
     try await store.removeSource(id: sid)
-    XCTAssertNil(try await store.file(id: 1)) // cascade removed the file
+    let cascaded = try await store.file(id: 1)
+    XCTAssertNil(cascaded) // cascade removed the file
 
     // A persistent source to parent the remaining file-based assertions.
     let src = try await store.addSource(SourceBookmark(id: 0, bookmarkData: Data(), displayPath: "/docs"))
@@ -24,7 +26,8 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
     let f = FileRecord(id: 11, bookmarkID: src, relativePath: "a", displayName: "a",
                        sizeBytes: 42, mtime: mtime, fileID: 7, typeScope: .document)
     try await store.upsertFiles([f])
-    XCTAssertTrue(try await store.unchangedFileIDs(matching: [f.signature]).contains(11))
+    let unchanged = try await store.unchangedFileIDs(matching: [f.signature])
+    XCTAssertTrue(unchanged.contains(11))
 
     // Mark deleted / restore
     try await store.upsertFiles([
@@ -32,9 +35,11 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
                    sizeBytes: 1, mtime: .now, typeScope: .document)
     ])
     try await store.markDeleted(ids: [21])
-    XCTAssertEqual(try await store.file(id: 21)?.status, .skipped)
+    let deleted = try await store.file(id: 21)
+    XCTAssertEqual(deleted?.status, .skipped)
     try await store.restore(ids: [21])
-    XCTAssertEqual(try await store.file(id: 21)?.status, .indexed)
+    let restored = try await store.file(id: 21)
+    XCTAssertEqual(restored?.status, .indexed)
 
     // Embedding invalidation + float32 BLOB round-trip
     let keep = try await store.saveEmbedding(Embedding(id: 0, modelID: "modelB", dim: 2, vector: [1, 0]))
@@ -43,7 +48,8 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
     let kept = try await store.embedding(id: keep)
     XCTAssertNotNil(kept)
     XCTAssertEqual(kept?.vector, [1, 0])
-    XCTAssertNil(try await store.embedding(id: drop))
+    let dropped = try await store.embedding(id: drop)
+    XCTAssertNil(dropped)
 
     // Session round-trip (rootBookmarkIDs packed into scopes_json). id 0 => the store assigns the id and
     // the returned session must carry it (regression guard for the InMemory createSession id fix).
@@ -62,16 +68,21 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
         members: [11, 21],
         edges: [MatchEdge(groupID: 0, fileA: 11, fileB: 21, matchType: .exact, score: 1.0, reasonSummary: "sha256")]
     )
-    XCTAssertEqual(try await store.groups(sessionID: 0).first { $0.id == gid }?.memberFileIDs, [11, 21])
+    let savedGroup = try await store.groups(sessionID: 0).first { $0.id == gid }
+    XCTAssertEqual(savedGroup?.memberFileIDs, [11, 21])
     try await store.setKeeper(groupID: gid, fileID: 21)
-    XCTAssertEqual(try await store.groups(sessionID: 0).first { $0.id == gid }?.keeperFileID, 21)
+    let keptGroup = try await store.groups(sessionID: 0).first { $0.id == gid }
+    XCTAssertEqual(keptGroup?.keeperFileID, 21)
     try await store.ignoreGroup(gid)
-    XCTAssertEqual(try await store.groups(sessionID: 0).first { $0.id == gid }?.ignored, true)
-    XCTAssertTrue(try await store.sessions().allSatisfy { $0.id != 0 }) // group-parking sentinel stays hidden
+    let ignoredGroup = try await store.groups(sessionID: 0).first { $0.id == gid }
+    XCTAssertEqual(ignoredGroup?.ignored, true)
+    let sessions = try await store.sessions()
+    XCTAssertTrue(sessions.allSatisfy { $0.id != 0 }) // group-parking sentinel stays hidden
 
     // Ignore pairs (normalized so (a,b) == (b,a))
     try await store.ignorePair(21, 11)
-    XCTAssertTrue(try await store.ignoredPairs().contains(Pair(11, 21)))
+    let ignoredPairs = try await store.ignoredPairs()
+    XCTAssertTrue(ignoredPairs.contains(Pair(11, 21)))
 }
 
 final class InMemoryIndexStoreTests: XCTestCase {
