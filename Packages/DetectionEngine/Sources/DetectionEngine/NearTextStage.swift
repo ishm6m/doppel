@@ -2,8 +2,9 @@ import DoppelKit
 import Foundation
 
 /// Stage 2 near-duplicate text detection (ARCHITECTURE.md §3). Pure: given survivors' normalized
-/// text, emits `.nearText` `DuplicateGroup`s. LSH prunes comparisons to docs sharing a band bucket,
-/// then estimated Jaccard ≥ `nearDupTextThreshold` confirms the edge (confidence = that Jaccard).
+/// text, emits `.nearText` edges (the final-clustering pass builds the groups). LSH prunes comparisons
+/// to docs sharing a band bucket, then estimated Jaccard ≥ `nearDupTextThreshold` confirms the edge
+/// (score = that Jaccard).
 public struct NearTextStage: Sendable {
     public struct Input: Sendable {
         public let record: FileRecord
@@ -31,12 +32,12 @@ public struct NearTextStage: Sendable {
         banding = LSHBanding(permutations: config.minhashPermutations)
     }
 
-    public func group(_ inputs: [Input]) -> [ResolvedGroup] {
+    public func group(_ inputs: [Input]) -> StageOutput {
         let sigs = inputs.map { hasher.signature($0.text) }
+        var out = StageOutput()
+        out.records = inputs.map(\.record)
 
         // Only LSH-bucket co-occurring docs are ever Jaccard-compared (the pruning invariant).
-        var uf = UnionFind(count: inputs.count)
-        var edgeJaccard: [Pair: Double] = [:]
         for pair in banding.candidatePairs(signatures: sigs) {
             let i = Int(pair.a), j = Int(pair.b)
             onCompare?(i, j)
@@ -47,37 +48,16 @@ public struct NearTextStage: Sendable {
             // 128-perm estimate below threshold even at true Jaccard ~0.9 (see docs/KNOWN_LIMITATIONS.md).
             // Upgrade path: exact-Jaccard verify on near-gate candidates, or adaptive perm count.
             if estimate >= config.nearDupTextThreshold {
-                uf.union(i, j)
-                edgeJaccard[pair] = estimate
+                let regions = Self.changedRegions(inputs[i].text, inputs[j].text)
+                out.edges.append(StageEdge(
+                    pair: Pair(inputs[i].record.id, inputs[j].record.id),
+                    type: .nearText,
+                    score: estimate,
+                    reason: "Near-identical text — \(regions) changed region\(regions == 1 ? "" : "s")"
+                ))
             }
         }
-
-        return uf.groups().compactMap { cluster in
-            guard cluster.count > 1 else { return nil }
-            return makeGroup(cluster: cluster, inputs: inputs, edgeJaccard: edgeJaccard)
-        }
-    }
-
-    private func makeGroup(cluster: [Int], inputs: [Input], edgeJaccard: [Pair: Double]) -> ResolvedGroup? {
-        let members = cluster.map { inputs[$0].record }.sorted { $0.id < $1.id }
-        guard let keeper = KeeperHeuristic.suggestKeeper(from: members) else { return nil }
-        let clusterSet = Set(cluster)
-        // Conservative confidence: the weakest edge holding the cluster together.
-        let edges = edgeJaccard.filter { clusterSet.contains(Int($0.key.a)) && clusterSet.contains(Int($0.key.b)) }
-        let confidence = edges.values.min() ?? config.nearDupTextThreshold
-
-        let texts = Dictionary(uniqueKeysWithValues: cluster.map { (inputs[$0].record.id, inputs[$0].text) })
-        let other = members.first { $0.id != keeper.id } ?? keeper
-        let regions = Self.changedRegions(texts[keeper.id] ?? "", texts[other.id] ?? "")
-        let group = DuplicateGroup(
-            id: 0,
-            matchType: .nearText,
-            confidence: confidence,
-            explanation: "Near-identical text — \(regions) changed region\(regions == 1 ? "" : "s")",
-            keeperFileID: keeper.id,
-            memberFileIDs: members.map(\.id)
-        )
-        return ResolvedGroup(group: group, members: members)
+        return out
     }
 
     /// Count of contiguous changed word-runs between two normalized texts (a fast, cheap diff —
