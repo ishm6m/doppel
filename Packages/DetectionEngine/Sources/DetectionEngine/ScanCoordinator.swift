@@ -42,35 +42,46 @@ public actor ScanCoordinator: ScanCoordinating {
 
         if Task.isCancelled { c.yield(.cancelled(partial: summary)); c.finish(); return }
 
-        // Stage 1: hash only size buckets with ≥2 members; emit groups as each bucket resolves.
+        // Stages contribute EDGES to these shared collectors; groups are built once, post-Stage-2.
+        // No `.groupFound` is emitted until the clustering pass — groups are final when emitted.
+        var edges: [StageEdge] = []
+        var records: [Int64: FileRecord] = [:]
+
+        // Stage 1: hash only size buckets with ≥2 members; collect exact edges + hashed records.
         let buckets = Stage0Result(files: candidates, skipped: []).exactCandidateBuckets()
         let grouper = hash.map { ExactGrouper(maxConcurrency: request.config.maxConcurrency, hash: $0) }
             ?? ExactGrouper(maxConcurrency: request.config.maxConcurrency)
         let totalToHash = buckets.reduce(0) { $0 + $1.count }
         var hashed = 0
-        var exactGroups: [ResolvedGroup] = []
 
         for bucket in buckets {
             if Task.isCancelled { c.yield(.cancelled(partial: summary)); c.finish(); return }
             let r = await grouper.group(bucket: bucket)
             hashed += bucket.count
             c.yield(.progress(phase: .hashing, processed: hashed, total: totalToHash))
-            for g in r.groups {
-                exactGroups.append(g)
-                emitGroup(g, &summary, c)
+            edges += r.edges
+            for rec in r.records {
+                records[rec.id] = rec
             }
             emitSkips(r.skipped)
         }
 
-        // Stage 2: near-text on survivors (one representative per exact group + all unmatched docs).
+        // Stage 2: near-text on survivors (one representative per exact set + all unmatched docs).
         if Task.isCancelled { c.yield(.cancelled(partial: summary)); c.finish(); return }
-        let inputs = await extractText(survivors(of: candidates, exactGroups: exactGroups), &summary, c)
+        let inputs = await extractText(survivors(of: candidates, exactEdges: edges), &summary, c)
         c.yield(.progress(phase: .fingerprinting, processed: inputs.count, total: inputs.count))
-        for g in NearTextStage(config: request.config).group(inputs) {
+        let near = NearTextStage(config: request.config).group(inputs)
+        edges += near.edges
+        for rec in near.records where records[rec.id] == nil {
+            records[rec.id] = rec
+        } // exact-wins keeps sha256
+
+        // Final clustering: one file → one authoritative group. Emit each, then finish.
+        if Task.isCancelled { c.yield(.cancelled(partial: summary)); c.finish(); return }
+        c.yield(.progress(phase: .clustering, processed: totalToHash, total: totalToHash))
+        for g in FinalClustering.cluster(edges: edges, records: records) {
             emitGroup(g, &summary, c)
         }
-
-        c.yield(.progress(phase: .clustering, processed: totalToHash, total: totalToHash))
         c.yield(.finished(summary: summary))
         c.finish()
     }
@@ -82,15 +93,22 @@ public actor ScanCoordinator: ScanCoordinating {
         summary.bytesReclaimable += Int64(g.members.count - 1) * (g.members.first?.sizeBytes ?? 0)
     }
 
-    /// Files that carry forward to content stages: every unmatched file, plus one keeper per exact
-    /// group (so the group's content can still cross-match *other* files). ARCHITECTURE.md §3.
-    private func survivors(of candidates: [EnumeratedFile], exactGroups: [ResolvedGroup]) -> [EnumeratedFile] {
-        var memberIDs = Set<Int64>(), keepers = Set<Int64>()
-        for g in exactGroups {
-            memberIDs.formUnion(g.group.memberFileIDs)
-            keepers.insert(g.group.keeperFileID)
+    /// Files that carry forward to content stages: every file not in any exact set, plus one
+    /// representative per exact set (so its content can still cross-match *other* files, which the
+    /// final-clustering pass then merges back). ARCHITECTURE.md §3. Members are byte-identical, so
+    /// any representative is interchangeable; we pick the lowest id for determinism.
+    private func survivors(of candidates: [EnumeratedFile], exactEdges: [StageEdge]) -> [EnumeratedFile] {
+        guard !exactEdges.isEmpty else { return candidates }
+        let ids = Array(Set(exactEdges.flatMap { [$0.pair.a, $0.pair.b] })).sorted()
+        let index = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($1, $0) })
+        var uf = UnionFind(count: ids.count)
+        for e in exactEdges {
+            guard let ia = index[e.pair.a], let ib = index[e.pair.b] else { continue }
+            uf.union(ia, ib)
         }
-        return candidates.filter { !memberIDs.contains($0.record.id) || keepers.contains($0.record.id) }
+        let representatives = Set(uf.groups().compactMap { comp in comp.map { ids[$0] }.min() })
+        let inExact = Set(ids)
+        return candidates.filter { !inExact.contains($0.record.id) || representatives.contains($0.record.id) }
     }
 
     private func extractText(
