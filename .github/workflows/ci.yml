@@ -23,8 +23,18 @@ jobs:
           done
 
       - name: Lint
+        # Pinned to the exact versions from the first green run (SHA f828b182) so a tool
+        # bump can't redden the gate. Brew always grabs latest, so we fetch release binaries.
         run: |
           set -e
-          brew install swiftformat swiftlint
+          BIN="$RUNNER_TEMP/bin"; mkdir -p "$BIN"
+          curl -fsSL https://github.com/nicklockwood/SwiftFormat/releases/download/0.61.1/swiftformat.zip -o sf.zip
+          curl -fsSL https://github.com/realm/SwiftLint/releases/download/0.64.1/portable_swiftlint.zip -o sl.zip
+          unzip -joq sf.zip swiftformat -d "$BIN"
+          unzip -joq sl.zip swiftlint -d "$BIN"
+          chmod +x "$BIN"/*
+          export PATH="$BIN:$PATH"
+          swiftformat --version
+          swiftlint version
           swiftformat --lint .
           swiftlint --strict
