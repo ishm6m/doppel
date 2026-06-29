@@ -12,12 +12,14 @@ final class NearTextTests: XCTestCase {
         )
     }
 
-    /// A near-dup pair: 120 unique words, the copy changes one word (the "date"). True Jaccard ≈ 0.92,
-    /// comfortably above the 0.85 gate. Disjoint `prefix` keeps unrelated pairs from cross-matching.
+    /// A near-dup pair: 200 unique words, the copy changes one word (the "date"). True Jaccard ≈ 0.95.
+    /// 200 (not ~120) keeps the 128-perm MinHash *estimate* reliably above 0.85 regardless of which
+    /// token changes — a single change in a shorter doc can dip the estimate under the gate.
+    /// Disjoint `prefix` keeps unrelated pairs from cross-matching.
     private func nearDupPair(_ prefix: String, _ idA: Int64, _ idB: Int64) -> [NearTextStage.Input] {
-        var words = (0 ..< 120).map { "\(prefix)\($0)" }
+        var words = (0 ..< 200).map { "\(prefix)\($0)" }
         let a = words.joined(separator: " ")
-        words[60] = "\(prefix)changed"
+        words[100] = "\(prefix)changed"
         let b = words.joined(separator: " ")
         return [
             .init(record: rec(idA, "\(prefix)-a.txt"), text: a),
@@ -26,7 +28,7 @@ final class NearTextTests: XCTestCase {
     }
 
     private func loner(_ id: Int64, _ prefix: String) -> NearTextStage.Input {
-        .init(record: rec(id, "\(prefix).txt"), text: (0 ..< 120).map { "\(prefix)\($0)" }.joined(separator: " "))
+        .init(record: rec(id, "\(prefix).txt"), text: (0 ..< 200).map { "\(prefix)\($0)" }.joined(separator: " "))
     }
 
     // MARK: - DoD cases
