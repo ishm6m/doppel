@@ -48,8 +48,8 @@
 - [ ] **T6.3** Scan history sidebar + reopen (F12). DoD: F12 acceptance.
 
 ## Milestone 7 — Semantic tier (opt-in)
-- [ ] **T7.1** `EmbeddingProvider` protocol + deterministic stub. DoD: stub-driven tests.
-- [ ] **T7.2** Stage 3 embed-survivors + cosine within buckets + `.semantic` groups + model invalidation (F6). DoD: F6 acceptance with stub.
+- [x] **T7.1** `EmbeddingProvider` protocol + deterministic stub. DoD met: stub-driven tests.
+- [~] **T7.2** Stage 3 embed-survivors + cosine within buckets + `.semantic` groups + model invalidation (F6). Engine core done: pure `SemanticStage` emits `.semantic` edges (bucket-pruned cosine, no all-pairs), F6 stub acceptance + model-invalidation tests green; it slots into the existing edge/clustering pass. **Remaining:** opt-in `deepScan(sessionID:)` wiring over a finished session's persisted survivors (app/ScanService + IndexStore) — moves with T7.3.
 - [ ] **T7.3** "Deep scan" UI affordance (global, opt-in). DoD: runs only on demand; battery note.
 - [ ] **T7.4** (Gated) Wire Core ML provider once model pinned by human. DoD: provider swaps without engine changes.
 
