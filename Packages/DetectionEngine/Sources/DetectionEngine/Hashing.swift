@@ -1,5 +1,5 @@
-import Foundation
 import CryptoKit // macOS-native; no extra package dependency
+import Foundation
 
 /// Streamed SHA-256 (Stage 1, task T2.2). Never loads a whole file into memory.
 public enum Hasher256 {
@@ -13,7 +13,9 @@ public enum Hasher256 {
     /// place so callers (and tests asserting no whole-file load) share the exact same code path.
     public static func hash(chunks nextChunk: () throws -> Data?) rethrows -> Data {
         var hasher = SHA256()
-        while let chunk = try nextChunk(), !chunk.isEmpty { hasher.update(data: chunk) }
+        while let chunk = try nextChunk(), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
         return Data(hasher.finalize())
     }
 }
@@ -24,15 +26,19 @@ public struct UnionFind {
     private var rank: [Int]
 
     public init(count: Int) {
-        parent = Array(0..<count)
+        parent = Array(0 ..< count)
         rank = Array(repeating: 0, count: count)
     }
 
     public mutating func find(_ x: Int) -> Int {
         var root = x
-        while parent[root] != root { root = parent[root] }
+        while parent[root] != root {
+            root = parent[root]
+        }
         var cur = x
-        while parent[cur] != root { let next = parent[cur]; parent[cur] = root; cur = next }
+        while parent[cur] != root {
+            let next = parent[cur]; parent[cur] = root; cur = next
+        }
         return root
     }
 
@@ -46,7 +52,9 @@ public struct UnionFind {
 
     public mutating func groups() -> [[Int]] {
         var buckets: [Int: [Int]] = [:]
-        for i in parent.indices { buckets[find(i), default: []].append(i) }
+        for i in parent.indices {
+            buckets[find(i), default: []].append(i)
+        }
         return Array(buckets.values)
     }
 }

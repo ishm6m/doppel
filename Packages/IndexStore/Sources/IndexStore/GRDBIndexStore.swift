@@ -1,5 +1,5 @@
-import Foundation
 import DoppelKit
+import Foundation
 import GRDB
 
 /// Production persistence (SQLite via GRDB). This is a SKELETON for Milestone 1 (tasks T1.1–T1.3):
@@ -15,14 +15,14 @@ public actor GRDBIndexStore: IndexStoring {
         config.prepareDatabase { db in
             try db.execute(sql: "PRAGMA journal_mode = WAL")
         }
-        self.dbQueue = try DatabaseQueue(path: path.path, configuration: config)
+        dbQueue = try DatabaseQueue(path: path.path, configuration: config)
         try Self.migrator.migrate(dbQueue)
     }
 
     /// In-memory variant for tests that still exercise the real schema.
     public init(inMemory: Bool) throws {
         precondition(inMemory)
-        self.dbQueue = try DatabaseQueue() // anonymous in-memory db
+        dbQueue = try DatabaseQueue() // anonymous in-memory db
         try Self.migrator.migrate(dbQueue)
     }
 
@@ -117,7 +117,7 @@ public actor GRDBIndexStore: IndexStoring {
 
     // MARK: IndexStoring
 
-    // Sources
+    /// Sources
     public func addSource(_ bookmark: SourceBookmark) async throws -> Int64 {
         try await dbQueue.write { db in
             try db.execute(
@@ -148,7 +148,7 @@ public actor GRDBIndexStore: IndexStoring {
         }
     }
 
-    // Files
+    /// Files
     public func upsertFiles(_ files: [FileRecord]) async throws {
         try await dbQueue.write { db in
             for f in files {
@@ -166,7 +166,7 @@ public actor GRDBIndexStore: IndexStoring {
                       phash = excluded.phash, embedding_id = excluded.embedding_id, status = excluded.status,
                       issue_json = excluded.issue_json
                     """,
-                    arguments: try fileArguments(f)
+                    arguments: fileArguments(f)
                 )
             }
         }
@@ -199,8 +199,13 @@ public actor GRDBIndexStore: IndexStoring {
         }
     }
 
-    public func markDeleted(ids: [Int64]) async throws { try await setStatus(ids, to: .skipped) }
-    public func restore(ids: [Int64]) async throws { try await setStatus(ids, to: .indexed) }
+    public func markDeleted(ids: [Int64]) async throws {
+        try await setStatus(ids, to: .skipped)
+    }
+
+    public func restore(ids: [Int64]) async throws {
+        try await setStatus(ids, to: .indexed)
+    }
 
     private func setStatus(_ ids: [Int64], to status: FileStatus) async throws {
         guard !ids.isEmpty else { return }
@@ -213,7 +218,7 @@ public actor GRDBIndexStore: IndexStoring {
         }
     }
 
-    // Groups
+    /// Groups
     public func saveGroup(_ group: DuplicateGroup, members: [Int64], edges: [MatchEdge]) async throws -> Int64 {
         try await dbQueue.write { db in
             // ponytail: saveGroup has no sessionID in the protocol, but duplicate_group.scan_id is
@@ -267,7 +272,7 @@ public actor GRDBIndexStore: IndexStoring {
         }
     }
 
-    public func groups(sessionID: Int64) async throws -> [DuplicateGroup] {
+    public func groups(sessionID _: Int64) async throws -> [DuplicateGroup] {
         // Mirrors InMemoryIndexStore: returns all groups ordered by id (sessionID is not used for filtering).
         try await dbQueue.read { db in
             try Row.fetchAll(db, sql: "SELECT * FROM duplicate_group ORDER BY id").map { row in
@@ -316,7 +321,7 @@ public actor GRDBIndexStore: IndexStoring {
         }
     }
 
-    // Embeddings
+    /// Embeddings
     public func saveEmbedding(_ embedding: Embedding) async throws -> Int64 {
         let blob = packFloats(embedding.vector)
         return try await dbQueue.write { db in
@@ -343,8 +348,12 @@ public actor GRDBIndexStore: IndexStoring {
     public func embedding(id: Int64) async throws -> Embedding? {
         try await dbQueue.read { db in
             try Row.fetchOne(db, sql: "SELECT * FROM embedding WHERE id = ?", arguments: [id]).map { row in
-                Embedding(id: row["id"], modelID: row["model_id"], dim: row["dim"],
-                          vector: unpackFloats(row["vector"]))
+                Embedding(
+                    id: row["id"],
+                    modelID: row["model_id"],
+                    dim: row["dim"],
+                    vector: unpackFloats(row["vector"])
+                )
             }
         }
     }
@@ -356,7 +365,7 @@ public actor GRDBIndexStore: IndexStoring {
         }
     }
 
-    // Sessions
+    /// Sessions
     public func createSession(_ session: ScanSession) async throws -> Int64 {
         let scopesJSON = try encodeSessionScopes(session)
         return try await dbQueue.write { db in
@@ -419,7 +428,7 @@ private enum StoreError: Error { case decode(String) }
 
 private func fileArguments(_ f: FileRecord) throws -> StatementArguments {
     let issueJSON: String? = try f.issue.map { issue in
-        guard let s = String(data: try JSONEncoder().encode(issue), encoding: .utf8) else {
+        guard let s = try String(data: JSONEncoder().encode(issue), encoding: .utf8) else {
             throw StoreError.decode("issue JSON not UTF-8")
         }
         return s
@@ -475,7 +484,7 @@ private struct SessionScopes: Codable {
 
 private func encodeSessionScopes(_ session: ScanSession) throws -> String {
     let payload = SessionScopes(scopes: session.scopes.map(\.rawValue).sorted(), roots: session.rootBookmarkIDs)
-    guard let s = String(data: try JSONEncoder().encode(payload), encoding: .utf8) else {
+    guard let s = try String(data: JSONEncoder().encode(payload), encoding: .utf8) else {
         throw StoreError.decode("scopes JSON not UTF-8")
     }
     return s

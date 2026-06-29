@@ -1,5 +1,5 @@
-import Foundation
 import DoppelKit
+import Foundation
 
 // MARK: - Configuration (API.md §1)
 
@@ -29,15 +29,19 @@ public struct DetectionConfig: Sendable {
 }
 
 public struct ScanRequest: Sendable {
-    public var roots: [URL]                 // already security-scope-resolved by the app layer
+    public var roots: [URL] // already security-scope-resolved by the app layer
     public var scopes: Set<FileTypeScope>
     public var config: DetectionConfig
     /// Signatures of files the store already knows are unchanged. The app fills this from
     /// `IndexStoring.unchangedFileIDs(...)`; the engine just skips matches (incremental re-scan)
     /// without ever importing IndexStore.
     public var knownSignatures: Set<FileSignature>
-    public init(roots: [URL], scopes: Set<FileTypeScope> = [.document],
-                config: DetectionConfig = .init(), knownSignatures: Set<FileSignature> = []) {
+    public init(
+        roots: [URL],
+        scopes: Set<FileTypeScope> = [.document],
+        config: DetectionConfig = .init(),
+        knownSignatures: Set<FileSignature> = []
+    ) {
         self.roots = roots
         self.scopes = scopes
         self.config = config
@@ -74,6 +78,7 @@ public enum ScanEvent: Sendable {
 }
 
 // MARK: - Coordinator protocol
+
 //
 // Architectural note (resolves the apparent coupling in API.md): the engine is PURE and does NOT
 // depend on IndexStore. It only emits events. The app-layer ScanService consumes the stream and
@@ -114,20 +119,26 @@ public protocol EmbeddingProvider: Sendable {
 public struct StubEmbeddingProvider: EmbeddingProvider {
     public let modelID = "stub-v1"
     public let dimension: Int
-    public init(dimension: Int = 64) { self.dimension = dimension }
+    public init(dimension: Int = 64) {
+        self.dimension = dimension
+    }
 
     public func embed(text: String) async throws -> [Float] {
         var vec = [Float](repeating: 0, count: dimension)
         // Hash each token into the vector deterministically.
         for token in text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }) {
-            var h = 1469598103934665603 as UInt64 // FNV-1a
-            for byte in token.utf8 { h = (h ^ UInt64(byte)) &* 1099511628211 }
+            var h = 1_469_598_103_934_665_603 as UInt64 // FNV-1a
+            for byte in token.utf8 {
+                h = (h ^ UInt64(byte)) &* 1_099_511_628_211
+            }
             let idx = Int(h % UInt64(dimension))
             vec[idx] += 1
         }
         // L2 normalize
         let norm = sqrt(vec.reduce(0) { $0 + Double($1 * $1) })
-        if norm > 0 { for i in vec.indices { vec[i] = Float(Double(vec[i]) / norm) } }
+        if norm > 0 { for i in vec.indices {
+            vec[i] = Float(Double(vec[i]) / norm)
+        } }
         return vec
     }
 }

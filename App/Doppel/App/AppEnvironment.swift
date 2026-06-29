@@ -1,9 +1,9 @@
+import DetectionEngine
+import DoppelKit
 import Foundation
+import IndexStore
 import Observation
 import OSLog
-import DoppelKit
-import IndexStore
-import DetectionEngine
 
 /// Composition root / DI container (STATE_MANAGEMENT.md §2). Manual constructor injection — no DI framework.
 @MainActor
@@ -14,9 +14,11 @@ final class AppEnvironment {
     let embedding: any EmbeddingProvider
     let log = Logger(subsystem: AppInfo.bundleIdentifier, category: "app")
 
-    init(store: any IndexStoring,
-         coordinator: any ScanCoordinating,
-         embedding: any EmbeddingProvider) {
+    init(
+        store: any IndexStoring,
+        coordinator: any ScanCoordinating,
+        embedding: any EmbeddingProvider
+    ) {
         self.store = store
         self.coordinator = coordinator
         self.embedding = embedding
@@ -29,16 +31,22 @@ final class AppEnvironment {
     }
 
     static func preview() -> AppEnvironment {
-        AppEnvironment(store: InMemoryIndexStore(),
-                       coordinator: PlaceholderCoordinator(),
-                       embedding: StubEmbeddingProvider())
+        AppEnvironment(
+            store: InMemoryIndexStore(),
+            coordinator: PlaceholderCoordinator(),
+            embedding: StubEmbeddingProvider()
+        )
     }
 
     private static func makeStore() -> any IndexStoring {
         do {
-            let dir = try FileManager.default.url(for: .applicationSupportDirectory,
-                                                  in: .userDomainMask, appropriateFor: nil, create: true)
-                .appendingPathComponent(AppInfo.productName, isDirectory: true)
+            let dir = try FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            .appendingPathComponent(AppInfo.productName, isDirectory: true)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             return try GRDBIndexStore(path: dir.appendingPathComponent("index.sqlite"))
         } catch {
@@ -50,7 +58,7 @@ final class AppEnvironment {
 
 /// Temporary no-op coordinator so the app compiles and launches before the real engine (T2.3) lands.
 struct PlaceholderCoordinator: ScanCoordinating {
-    func scan(_ request: ScanRequest) -> AsyncThrowingStream<ScanEvent, Error> {
+    func scan(_: ScanRequest) -> AsyncThrowingStream<ScanEvent, Error> {
         AsyncThrowingStream { continuation in
             continuation.yield(.discovered(total: 0))
             continuation.yield(.finished(summary: ScanSummary()))
