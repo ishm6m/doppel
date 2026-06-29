@@ -83,6 +83,27 @@ final class ScanCoordinatorTests: XCTestCase {
         XCTAssertLessThan(partial.groupsFound, 2) // cancelled before both buckets finished
     }
 
+    /// Stage 2 wiring: a contract + a date-changed copy (not byte-identical) survive Stage 1 and
+    /// surface as one `.nearText` group, with a `.progress(.fingerprinting)` event emitted.
+    func testStage2EmitsNearTextGroupAndFingerprintingProgress() async throws {
+        let dir = try makeTree(); defer { try? FileManager.default.removeItem(at: dir) }
+        var words = (0 ..< 120).map { "w\($0)" }
+        try write(words.joined(separator: " "), "contract.txt", in: dir)
+        words[60] = "dated2025"
+        try write(words.joined(separator: " "), "contract-2025.txt", in: dir)
+
+        let events = try await drain(ScanCoordinator().scan(ScanRequest(roots: [dir], scopes: [.document])))
+
+        XCTAssertTrue(events.contains { if case .progress(.fingerprinting, _, _) = $0 { return true }; return false })
+        let near = events.compactMap { e -> DuplicateGroup? in
+            if case let .groupFound(g, _) = e, g.matchType == .nearText { return g }; return nil
+        }
+        XCTAssertEqual(near.count, 1)
+        XCTAssertGreaterThanOrEqual(near.first?.confidence ?? 0, 0.85)
+        guard case let .finished(summary) = events.last else { return XCTFail("must finish") }
+        XCTAssertEqual(summary.groupsFound, 1)
+    }
+
     // Incremental: files whose signature is already known are never re-hashed.
     func testIncrementalRunSkipsUnchangedFiles() async throws {
         let dir = try makeTree(); defer { try? FileManager.default.removeItem(at: dir) }
