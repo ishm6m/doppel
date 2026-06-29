@@ -1,18 +1,19 @@
-import XCTest
 import CryptoKit
 import DoppelKit
+import XCTest
 @testable import DetectionEngine
 
 final class DetectionEngineTests: XCTestCase {
-
     func testStreamedHashMatchesKnownValue() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try "hello".data(using: .utf8)!.write(to: tmp)
+        try try XCTUnwrap("hello".data(using: .utf8)?.write(to: tmp))
         defer { try? FileManager.default.removeItem(at: tmp) }
         let digest = try Hasher256.hash(fileAt: tmp)
         // SHA-256("hello")
-        XCTAssertEqual(digest.map { String(format: "%02x", $0) }.joined(),
-                       "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+        XCTAssertEqual(
+            digest.map { String(format: "%02x", $0) }.joined(),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        )
     }
 
     func testIdenticalFilesShareHash() throws {
@@ -21,7 +22,7 @@ final class DetectionEngineTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         let a = dir.appendingPathComponent("a.bin")
         let b = dir.appendingPathComponent("b.bin")
-        let payload = Data((0..<5000).map { UInt8($0 % 256) })
+        let payload = Data((0 ..< 5000).map { UInt8($0 % 256) })
         try payload.write(to: a); try payload.write(to: b)
         XCTAssertEqual(try Hasher256.hash(fileAt: a), try Hasher256.hash(fileAt: b))
     }
@@ -48,8 +49,13 @@ final class DetectionEngineTests: XCTestCase {
     private final class HashLog: @unchecked Sendable {
         private let lock = NSLock()
         private var urls: [URL] = []
-        func record(_ url: URL) { lock.lock(); urls.append(url); lock.unlock() }
-        var paths: Set<String> { lock.lock(); defer { lock.unlock() }; return Set(urls.map(\.path)) }
+        func record(_ url: URL) {
+            lock.lock(); urls.append(url); lock.unlock()
+        }
+
+        var paths: Set<String> {
+            lock.lock(); defer { lock.unlock() }; return Set(urls.map(\.path))
+        }
     }
 
     private func makeTree() throws -> URL {
@@ -86,7 +92,7 @@ final class DetectionEngineTests: XCTestCase {
     func testSizeUniqueFileIsNeverHashedAndFormsNoGroup() async throws {
         let dir = try makeTree(); defer { try? FileManager.default.removeItem(at: dir) }
         _ = try write("aaaa", "a.txt", in: dir)
-        _ = try write("aaaa", "b.txt", in: dir)             // collides with a.txt on size
+        _ = try write("aaaa", "b.txt", in: dir) // collides with a.txt on size
         let lone = try write("a unique length here", "lone.txt", in: dir) // unique size
 
         let stage0 = FileEnumerator(scopes: [.document]).enumerate(roots: [dir])

@@ -1,5 +1,5 @@
-import XCTest
 import DoppelKit
+import XCTest
 @testable import DetectionEngine
 
 final class ScanCoordinatorTests: XCTestCase {
@@ -18,11 +18,13 @@ final class ScanCoordinatorTests: XCTestCase {
 
     private func drain(_ stream: AsyncThrowingStream<ScanEvent, Error>) async throws -> [ScanEvent] {
         var events: [ScanEvent] = []
-        for try await e in stream { events.append(e) }
+        for try await e in stream {
+            events.append(e)
+        }
         return events
     }
 
-    // Full Stage0→Stage1 run emits the expected event order and the correct exact group.
+    /// Full Stage0→Stage1 run emits the expected event order and the correct exact group.
     func testFullRunEmitsExpectedSequenceAndGroup() async throws {
         let dir = try makeTree(); defer { try? FileManager.default.removeItem(at: dir) }
         try write("the same contract", "a.txt", in: dir)
@@ -31,19 +33,19 @@ final class ScanCoordinatorTests: XCTestCase {
 
         let events = try await drain(ScanCoordinator().scan(req))
 
-        guard case .discovered(let total) = events.first else { return XCTFail("first event must be .discovered") }
+        guard case let .discovered(total) = events.first else { return XCTFail("first event must be .discovered") }
         XCTAssertEqual(total, 2)
         XCTAssertTrue(events.contains { if case .progress(.hashing, _, _) = $0 { return true }; return false })
 
         let groups = events.compactMap { e -> (DuplicateGroup, [FileRecord])? in
-            if case .groupFound(let g, let m) = e { return (g, m) }; return nil
+            if case let .groupFound(g, m) = e { return (g, m) }; return nil
         }
         XCTAssertEqual(groups.count, 1)
         XCTAssertEqual(groups.first?.0.matchType, .exact)
         XCTAssertEqual(groups.first?.0.explanation, "Identical file contents")
         XCTAssertEqual(Set(groups.first?.1.map(\.displayName) ?? []), ["a.txt", "copy.txt"])
 
-        guard case .finished(let summary) = events.last else { return XCTFail("last event must be .finished") }
+        guard case let .finished(summary) = events.last else { return XCTFail("last event must be .finished") }
         XCTAssertEqual(summary.filesDiscovered, 2)
         XCTAssertEqual(summary.groupsFound, 1)
     }
@@ -75,10 +77,10 @@ final class ScanCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(events.contains { if case .cancelled = $0 { return true }; return false })
         XCTAssertFalse(events.contains { if case .finished = $0 { return true }; return false })
-        guard case .cancelled(let partial) = events.last else { return XCTFail("must end on .cancelled") }
-        let emittedGroups = events.filter { if case .groupFound = $0 { return true }; return false }.count
+        guard case let .cancelled(partial) = events.last else { return XCTFail("must end on .cancelled") }
+        let emittedGroups = events.count(where: { if case .groupFound = $0 { return true }; return false })
         XCTAssertEqual(partial.groupsFound, emittedGroups) // summary agrees with what was emitted
-        XCTAssertLessThan(partial.groupsFound, 2)          // cancelled before both buckets finished
+        XCTAssertLessThan(partial.groupsFound, 2) // cancelled before both buckets finished
     }
 
     // Incremental: files whose signature is already known are never re-hashed.
@@ -87,7 +89,7 @@ final class ScanCoordinatorTests: XCTestCase {
         try write("dup body", "x.txt", in: dir)
         try write("dup body", "y.txt", in: dir)
 
-        let known = Set(FileEnumerator(scopes: [.document]).enumerate(roots: [dir]).files.map { $0.record.signature })
+        let known = Set(FileEnumerator(scopes: [.document]).enumerate(roots: [dir]).files.map(\.record.signature))
         XCTAssertEqual(known.count, 2)
 
         let hashed = HashRecorder()
@@ -100,9 +102,9 @@ final class ScanCoordinatorTests: XCTestCase {
         let events = try await drain(stream)
 
         XCTAssertTrue(hashed.urls.isEmpty, "unchanged files must not be re-hashed")
-        guard case .discovered(let total) = events.first else { return XCTFail("first event must be .discovered") }
+        guard case let .discovered(total) = events.first else { return XCTFail("first event must be .discovered") }
         XCTAssertEqual(total, 0)
-        guard case .finished(let summary) = events.last else { return XCTFail("last event must be .finished") }
+        guard case let .finished(summary) = events.last else { return XCTFail("last event must be .finished") }
         XCTAssertEqual(summary.groupsFound, 0)
     }
 }
@@ -110,6 +112,11 @@ final class ScanCoordinatorTests: XCTestCase {
 private final class HashRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var seen: [URL] = []
-    func add(_ url: URL) { lock.lock(); seen.append(url); lock.unlock() }
-    var urls: [URL] { lock.lock(); defer { lock.unlock() }; return seen }
+    func add(_ url: URL) {
+        lock.lock(); seen.append(url); lock.unlock()
+    }
+
+    var urls: [URL] {
+        lock.lock(); defer { lock.unlock() }; return seen
+    }
 }

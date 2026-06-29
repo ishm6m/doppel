@@ -28,6 +28,7 @@ public struct FileIssue: Sendable, Codable, Hashable {
     public enum Kind: String, Sendable, Codable {
         case unreadable, unsupported, decodeFailed, tooLarge, permissionDenied
     }
+
     public let kind: Kind
     public let message: String
 
@@ -131,7 +132,7 @@ public struct DuplicateGroup: Identifiable, Sendable, Hashable {
     ) {
         // Invariants (see DATA_MODEL.md): explanation non-empty, confidence in [0,1].
         precondition(!explanation.isEmpty, "DuplicateGroup.explanation must not be empty")
-        precondition((0.0...1.0).contains(confidence), "confidence must be within 0...1")
+        precondition((0.0 ... 1.0).contains(confidence), "confidence must be within 0...1")
         self.id = id
         self.matchType = matchType
         self.confidence = confidence

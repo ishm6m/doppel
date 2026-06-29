@@ -1,15 +1,20 @@
-import Foundation
 import DoppelKit
+import Foundation
 
 /// Orchestrates Stage 0 (enumerate) + Stage 1 (exact hash) into a cancellable, incrementally-emitting
 /// scan (T2.3, ARCHITECTURE.md §3–4). Pure engine: emits `ScanEvent`s only — the app-side ScanService
 /// persists them. Incremental re-scan skips files whose signature is in `request.knownSignatures`.
 public actor ScanCoordinator: ScanCoordinating {
-    // Test seam: lets a test inject a hash closure (e.g. to trigger cancellation mid-run). Defaults to real.
+    /// Test seam: lets a test inject a hash closure (e.g. to trigger cancellation mid-run). Defaults to real.
     private let hash: (@Sendable (URL) throws -> Data)?
 
-    public init() { hash = nil }
-    init(hash: @escaping @Sendable (URL) throws -> Data) { self.hash = hash }
+    public init() {
+        hash = nil
+    }
+
+    init(hash: @escaping @Sendable (URL) throws -> Data) {
+        self.hash = hash
+    }
 
     public nonisolated func scan(_ request: ScanRequest) -> AsyncThrowingStream<ScanEvent, Error> {
         AsyncThrowingStream { continuation in
@@ -21,7 +26,9 @@ public actor ScanCoordinator: ScanCoordinating {
     func run(_ request: ScanRequest, _ c: AsyncThrowingStream<ScanEvent, Error>.Continuation) async {
         var summary = ScanSummary()
         func emitSkips(_ skips: [(FileRecord, FileIssue)]) {
-            for (rec, issue) in skips { c.yield(.fileSkipped(rec, issue)); summary.skippedCount += 1 }
+            for (rec, issue) in skips {
+                c.yield(.fileSkipped(rec, issue)); summary.skippedCount += 1
+            }
         }
 
         // Stage 0: enumerate (synchronous), then drop unchanged files (incremental) before any hashing.

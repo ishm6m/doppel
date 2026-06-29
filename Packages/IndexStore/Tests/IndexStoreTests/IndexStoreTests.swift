@@ -1,5 +1,5 @@
-import XCTest
 import DoppelKit
+import XCTest
 @testable import IndexStore
 
 /// Shared behavioral contract: every assertion runs against BOTH IndexStoring implementations
@@ -9,8 +9,15 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
     // Source round-trip + cascade delete
     let sid = try await store.addSource(SourceBookmark(id: 0, bookmarkData: Data(), displayPath: "/tmp"))
     try await store.upsertFiles([
-        FileRecord(id: 1, bookmarkID: sid, relativePath: "a.txt", displayName: "a.txt",
-                   sizeBytes: 10, mtime: .now, typeScope: .document)
+        FileRecord(
+            id: 1,
+            bookmarkID: sid,
+            relativePath: "a.txt",
+            displayName: "a.txt",
+            sizeBytes: 10,
+            mtime: .now,
+            typeScope: .document
+        )
     ])
     let sourceCount = try await store.sources().count
     XCTAssertEqual(sourceCount, 1)
@@ -23,16 +30,31 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
 
     // Unchanged detection (signature = size + mtime + fileID)
     let mtime = Date(timeIntervalSince1970: 100)
-    let f = FileRecord(id: 11, bookmarkID: src, relativePath: "a", displayName: "a",
-                       sizeBytes: 42, mtime: mtime, fileID: 7, typeScope: .document)
+    let f = FileRecord(
+        id: 11,
+        bookmarkID: src,
+        relativePath: "a",
+        displayName: "a",
+        sizeBytes: 42,
+        mtime: mtime,
+        fileID: 7,
+        typeScope: .document
+    )
     try await store.upsertFiles([f])
     let unchanged = try await store.unchangedFileIDs(matching: [f.signature])
     XCTAssertTrue(unchanged.contains(11))
 
     // Mark deleted / restore
     try await store.upsertFiles([
-        FileRecord(id: 21, bookmarkID: src, relativePath: "del", displayName: "del",
-                   sizeBytes: 1, mtime: .now, typeScope: .document)
+        FileRecord(
+            id: 21,
+            bookmarkID: src,
+            relativePath: "del",
+            displayName: "del",
+            sizeBytes: 1,
+            mtime: .now,
+            typeScope: .document
+        )
     ])
     try await store.markDeleted(ids: [21])
     let deleted = try await store.file(id: 21)
@@ -63,8 +85,14 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
 
     // Group save + members + keeper + ignore (files 11 & 21 exist under src, satisfying FKs)
     let gid = try await store.saveGroup(
-        DuplicateGroup(id: 0, matchType: .exact, confidence: 1.0, explanation: "identical",
-                       keeperFileID: 11, memberFileIDs: [11, 21]),
+        DuplicateGroup(
+            id: 0,
+            matchType: .exact,
+            confidence: 1.0,
+            explanation: "identical",
+            keeperFileID: 11,
+            memberFileIDs: [11, 21]
+        ),
         members: [11, 21],
         edges: [MatchEdge(groupID: 0, fileA: 11, fileB: 21, matchType: .exact, score: 1.0, reasonSummary: "sha256")]
     )

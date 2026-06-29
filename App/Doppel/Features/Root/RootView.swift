@@ -1,5 +1,5 @@
-import SwiftUI
 import DoppelKit
+import SwiftUI
 
 /// Three-column shell (UI_SPEC.md §1). Real content lands in Milestone 4.
 struct RootView: View {

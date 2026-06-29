@@ -1,5 +1,5 @@
-import Foundation
 import DoppelKit
+import Foundation
 
 /// The single persistence boundary. UI and engine speak to SQLite only through this protocol.
 /// See API.md §2 and DATA_MODEL.md. All methods are actor-safe.

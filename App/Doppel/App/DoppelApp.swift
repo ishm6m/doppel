@@ -1,5 +1,5 @@
-import SwiftUI
 import DoppelKit
+import SwiftUI
 
 @main
 struct DoppelApp: App {
