@@ -33,25 +33,30 @@ final class NearTextTests: XCTestCase {
 
     // MARK: - DoD cases
 
-    func testContractAndDateChangedCopyFormOneNearTextGroup() {
-        let inputs = nearDupPair("clause", 1, 2)
-        let groups = NearTextStage().group(inputs)
-
-        XCTAssertEqual(groups.count, 1)
-        let g = groups[0].group
-        XCTAssertEqual(g.matchType, .nearText)
-        XCTAssertGreaterThanOrEqual(g.confidence, 0.85) // ≈ 0.9 for a single-word change
-        XCTAssertTrue(g.explanation.contains("changed region"), "explanation must note the change")
-        XCTAssertEqual(Set(groups[0].members.map(\.displayName)), ["clause-a.txt", "clause-b.txt"])
+    /// Names of files an edge connects, looked up in the stage's emitted records.
+    private func edgeNames(_ edge: StageEdge, _ records: [FileRecord]) -> Set<String> {
+        Set(records.filter { [edge.pair.a, edge.pair.b].contains($0.id) }.map(\.displayName))
     }
 
-    func testUnrelatedDocsFormNoGroup() {
+    func testContractAndDateChangedCopyFormOneNearTextEdge() {
+        let inputs = nearDupPair("clause", 1, 2)
+        let out = NearTextStage().group(inputs)
+
+        XCTAssertEqual(out.edges.count, 1)
+        let e = out.edges[0]
+        XCTAssertEqual(e.type, .nearText)
+        XCTAssertGreaterThanOrEqual(e.score, 0.85) // ≈ 0.9 for a single-word change
+        XCTAssertTrue(e.reason.contains("changed region"), "reason must note the change")
+        XCTAssertEqual(edgeNames(e, out.records), ["clause-a.txt", "clause-b.txt"])
+    }
+
+    func testUnrelatedDocsFormNoEdge() {
         let inputs = [loner(1, "alpha"), loner(2, "beta")]
-        XCTAssertTrue(NearTextStage().group(inputs).isEmpty)
+        XCTAssertTrue(NearTextStage().group(inputs).edges.isEmpty)
     }
 
     /// Precision target (PRD ≥ 0.95): 8 constructed near-dup pairs + 2 unrelated loners.
-    /// Expect exactly 8 groups, each the correct pair, zero false positives ⇒ precision 1.0.
+    /// Expect exactly 8 edges, each the correct same-prefix pair, zero false positives ⇒ precision 1.0.
     func testPrecisionOnConstructedNearDupSet() {
         var inputs: [NearTextStage.Input] = []
         for i in 0 ..< 8 {
@@ -59,16 +64,16 @@ final class NearTextTests: XCTestCase {
         }
         inputs += [loner(100, "stray-a"), loner(101, "stray-b")]
 
-        let groups = NearTextStage().group(inputs)
-        XCTAssertEqual(groups.count, 8, "every near-dup pair grouped, nothing else")
-        for g in groups {
-            XCTAssertEqual(g.group.matchType, .nearText)
-            XCTAssertEqual(g.members.count, 2)
-            let names = g.members.map(\.displayName).sorted()
+        let out = NearTextStage().group(inputs)
+        XCTAssertEqual(out.edges.count, 8, "every near-dup pair found, nothing else")
+        for e in out.edges {
+            XCTAssertEqual(e.type, .nearText)
+            let names = edgeNames(e, out.records).sorted()
+            XCTAssertEqual(names.count, 2)
             XCTAssertEqual(names[0].dropLast(6), names[1].dropLast(6)) // same "docN_" prefix
         }
-        let grouped = Set(groups.flatMap(\.group.memberFileIDs))
-        XCTAssertFalse(grouped.contains(100) || grouped.contains(101), "no false-positive group on loners")
+        let touched = Set(out.edges.flatMap { [$0.pair.a, $0.pair.b] })
+        XCTAssertFalse(touched.contains(100) || touched.contains(101), "no false-positive edge on loners")
     }
 
     /// LSH pruning probe (mirrors T2.2's "lone file is never hashed"): a doc sharing no band bucket
