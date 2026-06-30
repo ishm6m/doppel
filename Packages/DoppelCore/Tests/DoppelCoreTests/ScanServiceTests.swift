@@ -137,7 +137,7 @@ final class ScanServiceTests: XCTestCase {
     func testSourcesPersistAndReloadAcrossServices() async throws {
         let store = InMemoryIndexStore()
         let encode: @Sendable (URL) throws -> Data = { Data($0.path.utf8) }
-        let decode: @Sendable (Data) throws -> URL = { URL(fileURLWithPath: String(decoding: $0, as: UTF8.self)) }
+        let decode: @Sendable (Data) throws -> URL = { URL(fileURLWithPath: String(bytes: $0, encoding: .utf8) ?? "") }
         let svc = ScanService(coordinator: StubCoordinator(events: []), store: store, makeBookmark: encode, openBookmark: decode)
 
         let added = try await svc.addSources([URL(fileURLWithPath: "/tmp/a"), URL(fileURLWithPath: "/tmp/b")])
