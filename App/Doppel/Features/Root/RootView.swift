@@ -12,6 +12,9 @@ struct RootView: View {
     @State private var scanTask: Task<Void, Never>?
     @State private var showImporter = false
     @State private var scanError: String?
+    /// File ids the user has checked for deletion. Never pre-populated (golden rule 3).
+    @State private var selection: Set<Int64> = []
+    @State private var showTrashConfirm = false
 
     private var scanService: ScanService {
         env.scanService
@@ -19,6 +22,11 @@ struct RootView: View {
 
     private var isScanning: Bool {
         scanTask != nil
+    }
+
+    /// FileRecords currently selected for deletion, in stable id order.
+    private var selectedFiles: [FileRecord] {
+        selection.sorted().compactMap { scanService.membersByID[$0] }
     }
 
     var body: some View {
@@ -34,6 +42,14 @@ struct RootView: View {
             content
                 .navigationTitle(AppInfo.productName)
                 .toolbar { toolbarContent }
+                .safeAreaInset(edge: .bottom) { bulkActionBar }
+                .sheet(isPresented: $showTrashConfirm) {
+                    TrashConfirmSheet(files: selectedFiles) {
+                        trashSelected()
+                    } onCancel: {
+                        showTrashConfirm = false
+                    }
+                }
         } detail: {
             InspectorPlaceholder()
         }
@@ -56,9 +72,9 @@ struct RootView: View {
 
     @ViewBuilder private var content: some View {
         if isScanning {
-            ScanProgressView(phase: scanService.phase, groups: scanService.groups, members: scanService.membersByID)
+            ScanProgressView(phase: scanService.phase, groups: scanService.groups, members: scanService.membersByID, selection: $selection)
         } else if !scanService.groups.isEmpty {
-            ResultsList(groups: scanService.groups, members: scanService.membersByID)
+            ResultsList(groups: scanService.groups, members: scanService.membersByID, selection: $selection)
         } else if scanService.summary != nil {
             ContentUnavailableView("No duplicates found 🎉", systemImage: "checkmark.seal")
         } else {
@@ -87,11 +103,27 @@ struct RootView: View {
         }
     }
 
+    /// Bottom bar shown only when ≥1 file is checked (UI_SPEC.md §6 bulk action bar).
+    @ViewBuilder private var bulkActionBar: some View {
+        if !selection.isEmpty {
+            HStack {
+                Text("\(selection.count) selected")
+                    .font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                Button("Deselect") { selection = [] }
+                Button("Move to Trash…", role: .destructive) { showTrashConfirm = true }
+                    .keyboardShortcut(.delete, modifiers: .command)
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding(.horizontal).padding(.vertical, 8)
+            .background(.bar)
+        }
+    }
+
     private func startScan(_ urls: [URL]) {
+        // ScanService owns security-scoped access for the results' lifetime (so files stay trashable).
+        selection = []
         scanTask = Task {
-            // Sandbox: fileImporter URLs are security-scoped — must open access around the scan.
-            let scoped = urls.filter { $0.startAccessingSecurityScopedResource() }
-            defer { scoped.forEach { $0.stopAccessingSecurityScopedResource() } }
             do {
                 try await scanService.startScan(ScanRequest(roots: urls, scopes: [.document]))
             } catch is CancellationError {
@@ -100,6 +132,15 @@ struct RootView: View {
                 scanError = error.localizedDescription
             }
             scanTask = nil
+        }
+    }
+
+    private func trashSelected() {
+        let ids = Array(selection)
+        showTrashConfirm = false
+        selection = []
+        Task {
+            do { try await scanService.trash(ids) } catch { scanError = error.localizedDescription }
         }
     }
 }
@@ -112,6 +153,7 @@ private struct ScanProgressView: View {
     let phase: ScanPhase?
     let groups: [DuplicateGroup]
     let members: [Int64: FileRecord]
+    @Binding var selection: Set<Int64>
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -123,7 +165,7 @@ private struct ScanProgressView: View {
                 Text("\(groups.count) groups").foregroundStyle(.secondary)
             }
             .padding(.horizontal)
-            ResultsList(groups: groups, members: members)
+            ResultsList(groups: groups, members: members, selection: $selection)
         }
         .padding(.top)
     }
@@ -133,10 +175,11 @@ private struct ScanProgressView: View {
 private struct ResultsList: View {
     let groups: [DuplicateGroup]
     let members: [Int64: FileRecord]
+    @Binding var selection: Set<Int64>
 
     var body: some View {
         List(groups) { group in
-            GroupCard(group: group, members: members)
+            GroupCard(group: group, members: members, selection: $selection)
         }
     }
 }
@@ -144,15 +187,30 @@ private struct ResultsList: View {
 private struct GroupCard: View {
     let group: DuplicateGroup
     let members: [Int64: FileRecord]
+    @Binding var selection: Set<Int64>
     @State private var isExpanded = false
+
+    private var nonKeeperIDs: [Int64] {
+        group.memberFileIDs.filter { $0 != group.keeperFileID }
+    }
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
+            Button("Select all but keeper") { selection.formUnion(nonKeeperIDs) }
+                .font(.caption).buttonStyle(.link)
+                .frame(maxWidth: .infinity, alignment: .leading)
             // ponytail: rows resolve from the in-memory member map; a file we somehow didn't retain
             // is skipped rather than crashing. Member IDs are unique per scan, so order is stable.
             ForEach(group.memberFileIDs, id: \.self) { id in
                 if let file = members[id] {
-                    MemberRow(file: file, isKeeper: id == group.keeperFileID)
+                    MemberRow(
+                        file: file,
+                        isKeeper: id == group.keeperFileID,
+                        isSelected: Binding(
+                            get: { selection.contains(id) },
+                            set: { if $0 { selection.insert(id) } else { selection.remove(id) } }
+                        )
+                    )
                 }
             }
         } label: {
@@ -199,14 +257,17 @@ private struct GroupCard: View {
     }
 }
 
-/// One file within a group (UI_SPEC.md §6 member row). The suggested keeper is starred; making the
-/// star interactive + selection checkboxes arrive with safe deletion (T5.2).
+/// One file within a group (UI_SPEC.md §6 member row): selection checkbox (never pre-checked),
+/// suggested-keeper star, name/path, size. Interactive keeper-set arrives with T5.4.
 private struct MemberRow: View {
     let file: FileRecord
     let isKeeper: Bool
+    @Binding var isSelected: Bool
 
     var body: some View {
         HStack(spacing: 8) {
+            Toggle("Select \(file.displayName)", isOn: $isSelected)
+                .labelsHidden().toggleStyle(.checkbox)
             Image(systemName: isKeeper ? "star.fill" : "doc")
                 .foregroundStyle(isKeeper ? .yellow : .secondary)
                 .help(isKeeper ? "Suggested keeper" : "")
@@ -220,6 +281,42 @@ private struct MemberRow: View {
             Text(file.sizeBytes.formatted(.byteCount(style: .file)))
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Native confirmation before any deletion (UI_SPEC.md §9). Lists every affected file and the space
+/// freed; the action is reversible (Trash), but we still always confirm (golden rule 3).
+private struct TrashConfirmSheet: View {
+    let files: [FileRecord]
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    private var freed: Int64 {
+        files.reduce(0) { $0 + $1.sizeBytes }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Move \(files.count) \(files.count == 1 ? "file" : "files") to Trash?")
+                .font(.headline)
+            Text("Frees \(freed.formatted(.byteCount(style: .file))). You can restore from the Trash.")
+                .font(.subheadline).foregroundStyle(.secondary)
+            List(files) { file in
+                Label(file.relativePath, systemImage: "doc")
+                    .truncationMode(.middle).lineLimit(1)
+            }
+            .frame(minHeight: 120, maxHeight: 240)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Move to Trash", role: .destructive, action: onConfirm)
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(width: 460)
     }
 }
 
