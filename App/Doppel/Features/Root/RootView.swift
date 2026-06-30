@@ -28,6 +28,12 @@ struct RootView: View {
         scanTask != nil
     }
 
+    /// True when a scan (past or just-finished) is selected in the sidebar — drives the results view.
+    private var isViewingSession: Bool {
+        if case .session = sidebarSelection { return true }
+        return false
+    }
+
     /// FileRecords currently selected for deletion, in stable id order.
     private var selectedFiles: [FileRecord] {
         selection.sorted().compactMap { scanService.membersByID[$0] }
@@ -38,7 +44,13 @@ struct RootView: View {
             List(selection: $sidebarSelection) {
                 Section("Library") {
                     Label("Sources", systemImage: "folder").tag(SidebarItem.sources)
-                    Label("Scans", systemImage: "clock.arrow.circlepath").tag(SidebarItem.scans)
+                }
+                if !scanService.sessions.isEmpty {
+                    Section("Recent Scans") {
+                        ForEach(scanService.sessions) { session in
+                            SessionRow(session: session).tag(SidebarItem.session(session.id))
+                        }
+                    }
                 }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 240)
@@ -68,8 +80,17 @@ struct RootView: View {
             InspectorPlaceholder()
         }
         .task {
-            // Re-resolve remembered folders so they're scannable without re-prompting (T4.2).
+            // Re-resolve remembered folders so they're scannable without re-prompting (T4.2), and
+            // load the scan history for the sidebar (T4.2/F12).
             do { try await scanService.loadSources() } catch { scanError = error.localizedDescription }
+            await scanService.loadSessions()
+        }
+        .onChange(of: sidebarSelection) { _, selection in
+            // Selecting a past scan reopens its results (F12).
+            guard case let .session(id) = selection else { return }
+            Task {
+                do { try await scanService.openSession(id) } catch { scanError = error.localizedDescription }
+            }
         }
         .fileImporter(
             isPresented: $showImporter,
@@ -100,16 +121,19 @@ struct RootView: View {
                 onCompare: compare,
                 onIgnore: ignoreGroup
             )
-        } else if !scanService.groups.isEmpty {
-            ResultsList(
-                groups: scanService.groups,
-                members: scanService.membersByID,
-                selection: $selection,
-                onCompare: compare,
-                onIgnore: ignoreGroup
-            )
-        } else if scanService.summary != nil {
-            ContentUnavailableView("No duplicates found 🎉", systemImage: "checkmark.seal")
+        } else if isViewingSession {
+            // A past (or just-finished) scan is selected: show its results, or the clean-bill state.
+            if scanService.groups.isEmpty {
+                ContentUnavailableView("No duplicates found 🎉", systemImage: "checkmark.seal")
+            } else {
+                ResultsList(
+                    groups: scanService.groups,
+                    members: scanService.membersByID,
+                    selection: $selection,
+                    onCompare: compare,
+                    onIgnore: ignoreGroup
+                )
+            }
         } else if !scanService.sources.isEmpty {
             SourcesView(
                 sources: scanService.sources,
@@ -187,7 +211,9 @@ struct RootView: View {
             do {
                 // Scopes + thresholds come from Settings (F11), so a settings change takes effect here.
                 let request = ScanRequest(roots: roots, scopes: DetectionSettings.scopes, config: DetectionSettings.config)
-                try await scanService.startScan(request, rootBookmarkIDs: bookmarkIDs)
+                let id = try await scanService.startScan(request, rootBookmarkIDs: bookmarkIDs)
+                // The finished scan becomes the selected history entry, so its results stay on screen.
+                sidebarSelection = .session(id)
             } catch is CancellationError {
                 // Expected when the user hits Cancel; ScanService still finalizes the session.
             } catch {
@@ -229,7 +255,26 @@ struct RootView: View {
     }
 }
 
-enum SidebarItem: Hashable { case sources, scans }
+enum SidebarItem: Hashable {
+    case sources
+    case session(Int64)
+}
+
+/// One past scan in the history sidebar (F12): when it ran + what it found.
+private struct SessionRow: View {
+    let session: ScanSession
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(session.startedAt.formatted(date: .abbreviated, time: .shortened))
+                .lineLimit(1)
+            Text("\(session.groupsFound) group\(session.groupsFound == 1 ? "" : "s") · "
+                + session.bytesReclaimable.formatted(.byteCount(style: .file)))
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .help("Reopen this scan")
+    }
+}
 
 /// Remembered source folders (T4.2): the list persists across launches so the user re-scans without
 /// re-picking. Add/remove here; scanning runs over all sources.
