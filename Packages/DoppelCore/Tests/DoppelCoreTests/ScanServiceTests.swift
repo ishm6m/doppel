@@ -138,6 +138,34 @@ final class ScanServiceTests: XCTestCase {
         XCTAssertTrue(rescan.groups.isEmpty, "ignored group does not recur")
     }
 
+    /// Settings ▸ Ignore List "Reset" (F11): clearing the ignore list lets a previously-ignored group
+    /// surface again on the next scan.
+    func testClearIgnoredListLetsGroupRecur() async throws {
+        let store = InMemoryIndexStore()
+        let group = DuplicateGroup(
+            id: 0, matchType: .exact, confidence: 1.0,
+            explanation: "Identical file contents", keeperFileID: 1, memberFileIDs: [1, 2]
+        )
+        let events: [ScanEvent] = [
+            .groupFound(group, members: [file(1, "a.txt"), file(2, "b.txt")]),
+            .finished(summary: ScanSummary(filesDiscovered: 2, groupsFound: 1))
+        ]
+        let svc = ScanService(coordinator: StubCoordinator(events: events), store: store)
+        try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]))
+        try await svc.ignore(XCTUnwrap(svc.groups.first))
+        let before = await svc.ignoredPairCount()
+        XCTAssertEqual(before, 1)
+
+        try await svc.clearIgnoredList()
+        let after = await svc.ignoredPairCount()
+        XCTAssertEqual(after, 0)
+
+        // Re-scan: the group is no longer suppressed.
+        let rescan = ScanService(coordinator: StubCoordinator(events: events), store: store)
+        try await rescan.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]))
+        XCTAssertEqual(rescan.groups.count, 1, "cleared ignore list lets the group recur")
+    }
+
     /// trash() moves the chosen files to the Trash (not unlinked), leaves the keeper, marks them
     /// deleted, and drops the now-singleton group. Uses real files in a temp dir.
     func testTrashMovesNonKeeperToTrashAndUpdatesState() async throws {

@@ -138,6 +138,10 @@ public actor InMemoryIndexStore: IndexStoring {
         ignored
     }
 
+    public func clearIgnoredPairs() async throws {
+        ignored.removeAll()
+    }
+
     /// Embeddings
     public func saveEmbedding(_ embedding: Embedding) async throws -> Int64 {
         let id = embedding.id == 0 ? makeID() : embedding.id
