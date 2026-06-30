@@ -120,5 +120,14 @@ final class ScanServiceTests: XCTestCase {
         XCTAssertFalse(fm.fileExists(atPath: dupe.path), "non-keeper moved to Trash")
         XCTAssertNil(svc.membersByID[2])
         XCTAssertTrue(svc.groups.isEmpty, "singleton group removed")
+
+        // Undo brings the trashed file back from the Trash and restores the live results.
+        XCTAssertTrue(svc.canUndoTrash)
+        let restored = try await svc.undoLastTrash()
+        XCTAssertEqual(restored, [2])
+        XCTAssertTrue(fm.fileExists(atPath: dupe.path), "non-keeper moved back out of Trash")
+        XCTAssertEqual(svc.membersByID[2]?.displayName, "b.txt")
+        XCTAssertEqual(svc.groups.count, 1, "group restored")
+        XCTAssertFalse(svc.canUndoTrash, "undo consumed")
     }
 }
