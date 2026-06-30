@@ -219,26 +219,17 @@ public actor GRDBIndexStore: IndexStoring {
     }
 
     /// Groups
-    public func saveGroup(_ group: DuplicateGroup, members: [Int64], edges: [MatchEdge]) async throws -> Int64 {
+    public func saveGroup(_ group: DuplicateGroup, members: [Int64], edges: [MatchEdge], sessionID: Int64) async throws -> Int64 {
         try await dbQueue.write { db in
-            // ponytail: saveGroup has no sessionID in the protocol, but duplicate_group.scan_id is
-            // NOT NULL with an enforced FK (we keep FK on for the source→file cascade). Park groups
-            // under a sentinel session 0, hidden from sessions(). Upgrade path: ScanService (app-side,
-            // owns session lifecycle — see docs/API.md) threads a real sessionID through saveGroup;
-            // drop the sentinel insert + the `id <> 0` filter in sessions() at that point.
-            try db.execute(
-                sql: "INSERT OR IGNORE INTO scan_session (id, started_at, scopes_json, state) VALUES (0, 0, '{}', ?)",
-                arguments: [ScanState.finished.rawValue]
-            )
-
+            // scan_id is the owning session (created by ScanService before the scan — see docs/API.md).
             if group.id == 0 {
                 try db.execute(
                     sql: """
                     INSERT INTO duplicate_group
                       (scan_id, match_type, confidence, explanation, keeper_file_id, ignored, created_at)
-                    VALUES (0, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    arguments: [group.matchType.rawValue, group.confidence, group.explanation,
+                    arguments: [sessionID, group.matchType.rawValue, group.confidence, group.explanation,
                                 group.keeperFileID, group.ignored, group.createdAt.timeIntervalSince1970]
                 )
             } else {
@@ -246,9 +237,9 @@ public actor GRDBIndexStore: IndexStoring {
                     sql: """
                     INSERT INTO duplicate_group
                       (id, scan_id, match_type, confidence, explanation, keeper_file_id, ignored, created_at)
-                    VALUES (?, 0, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    arguments: [group.id, group.matchType.rawValue, group.confidence, group.explanation,
+                    arguments: [group.id, sessionID, group.matchType.rawValue, group.confidence, group.explanation,
                                 group.keeperFileID, group.ignored, group.createdAt.timeIntervalSince1970]
                 )
             }
@@ -273,10 +264,9 @@ public actor GRDBIndexStore: IndexStoring {
         }
     }
 
-    public func groups(sessionID _: Int64) async throws -> [DuplicateGroup] {
-        // Mirrors InMemoryIndexStore: returns all groups ordered by id (sessionID is not used for filtering).
+    public func groups(sessionID: Int64) async throws -> [DuplicateGroup] {
         try await dbQueue.read { db in
-            try Row.fetchAll(db, sql: "SELECT * FROM duplicate_group ORDER BY id").map { row in
+            try Row.fetchAll(db, sql: "SELECT * FROM duplicate_group WHERE scan_id = ? ORDER BY id", arguments: [sessionID]).map { row in
                 let gid: Int64 = row["id"]
                 let members = try Int64.fetchAll(
                     db, sql: "SELECT file_id FROM group_member WHERE group_id = ? ORDER BY file_id",
@@ -416,9 +406,8 @@ public actor GRDBIndexStore: IndexStoring {
     }
 
     public func sessions() async throws -> [ScanSession] {
-        // id != 0 hides the sentinel session that parks groups (see saveGroup).
         try await dbQueue.read { db in
-            try Row.fetchAll(db, sql: "SELECT * FROM scan_session WHERE id <> 0 ORDER BY id").map(decodeSession)
+            try Row.fetchAll(db, sql: "SELECT * FROM scan_session ORDER BY id").map(decodeSession)
         }
     }
 }
