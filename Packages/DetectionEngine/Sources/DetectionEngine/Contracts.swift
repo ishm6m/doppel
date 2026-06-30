@@ -116,13 +116,24 @@ public protocol ContentExtractor: Sendable {
 public protocol EmbeddingProvider: Sendable {
     var modelID: String { get }
     var dimension: Int { get }
+    /// False only for the deterministic stub, whose vectors are NOT semantically meaningful. The app
+    /// hides the opt-in Deep Scan UI until this is true, so users are never shown "semantically
+    /// similar" groups that aren't (golden rule 4). Real models inherit the `true` default.
+    var isSemantic: Bool { get }
     func embed(text: String) async throws -> [Float]
+}
+
+public extension EmbeddingProvider {
+    var isSemantic: Bool {
+        true
+    }
 }
 
 /// Deterministic stub so the entire semantic tier is buildable and testable before a real model is pinned.
 /// Produces a stable pseudo-embedding from the input text. NOT semantically meaningful — for wiring/tests only.
 public struct StubEmbeddingProvider: EmbeddingProvider {
     public let modelID = "stub-v1"
+    public let isSemantic = false
     public let dimension: Int
     public init(dimension: Int = 64) {
         self.dimension = dimension
