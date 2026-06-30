@@ -38,3 +38,12 @@ jobs:
           swiftlint version
           swiftformat --lint .
           swiftlint --strict
+
+      - name: Forbid irreversible deletion
+        # Golden rule 2: app code never unlinks user files — deletion goes through the Trash only
+        # (FileManager.trashItem / NSWorkspace.recycle). Tests may clean up their own fixtures.
+        run: |
+          if grep -rnE '\.removeItem|unlink\(' --include='*.swift' Packages/*/Sources App; then
+            echo "::error::Use Trash (trashItem/recycle), never removeItem/unlink on user files"
+            exit 1
+          fi
