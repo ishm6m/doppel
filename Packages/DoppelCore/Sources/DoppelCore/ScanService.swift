@@ -181,21 +181,7 @@ public final class ScanService {
                 self.processed = processed
                 if let total { self.total = total }
             case let .groupFound(group, members):
-                // The user marked this exact set "not duplicates" — drop it before it surfaces (F7/F14).
-                if Self.isFullyIgnored(group, by: ignoredPairs) { continue }
-                // ponytail: persist the group's members + the group. We do NOT persist a full file
-                // inventory — the engine only emits grouped/skipped files, which is all the results
-                // UI needs. Add whole-corpus persistence when a screen actually needs every file.
-                try await store.upsertFiles(members)
-                let savedID = try await store.saveGroup(group, members: members.map(\.id), edges: [], sessionID: sessionID)
-                // ponytail: edges:[] — groupFound carries no MatchEdges; the compare view (F8) reads
-                // text live rather than stored edges. Thread real edges through if a screen needs them.
-                // Surface with the store-assigned id (the engine emits id 0) so the list has stable
-                // identities and "Ignore group" can target this group.
-                groups.append(group.withID(savedID))
-                for member in members {
-                    membersByID[member.id] = member
-                }
+                try await persistFoundGroup(group, members: members, sessionID: sessionID)
             case .fileSkipped:
                 break
             case let .finished(summary):
@@ -218,6 +204,23 @@ public final class ScanService {
             state: state
         ))
         return sessionID
+    }
+
+    /// Persists and surfaces one found group, unless the user already marked this exact set "not
+    /// duplicates" (F7/F14), in which case it's dropped before surfacing so it doesn't recur.
+    private func persistFoundGroup(_ group: DuplicateGroup, members: [FileRecord], sessionID: Int64) async throws {
+        if Self.isFullyIgnored(group, by: ignoredPairs) { return }
+        // ponytail: persist the group's members + the group. We do NOT persist a full file inventory —
+        // the engine only emits grouped/skipped files, which is all the results UI needs.
+        try await store.upsertFiles(members)
+        // ponytail: edges:[] — groupFound carries no MatchEdges; the compare view (F8) reads text live
+        // rather than stored edges. Surface with the store-assigned id (the engine emits id 0) so the
+        // list has stable identities and "Ignore group" can target this group.
+        let savedID = try await store.saveGroup(group, members: members.map(\.id), edges: [], sessionID: sessionID)
+        groups.append(group.withID(savedID))
+        for member in members {
+            membersByID[member.id] = member
+        }
     }
 
     /// On-disk URL for a member file, rebuilt from its source root + relative path.
