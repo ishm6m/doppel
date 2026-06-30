@@ -8,7 +8,11 @@ on:
 
 jobs:
   gate:
-    runs-on: macos-latest
+    # Self-hosted runner on the maintainer's Apple Silicon Mac (registered as a launchd service).
+    # GitHub-hosted macOS minutes bill at 10x and had exhausted the private-repo allowance, blocking
+    # all runs; self-hosting removes that dependency and runs where the gate already passes green.
+    # The machine's xcode-select already points at full Xcode, so swift test/XCTest resolve natively.
+    runs-on: [self-hosted, macOS]
     steps:
       - uses: actions/checkout@v4
 
