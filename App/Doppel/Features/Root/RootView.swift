@@ -76,7 +76,14 @@ struct RootView: View {
 
     @ViewBuilder private var content: some View {
         if isScanning {
-            ScanProgressView(phase: scanService.phase, groups: scanService.groups, members: scanService.membersByID, selection: $selection)
+            ScanProgressView(
+                phase: scanService.phase,
+                processed: scanService.processed,
+                total: scanService.total,
+                groups: scanService.groups,
+                members: scanService.membersByID,
+                selection: $selection
+            )
         } else if !scanService.groups.isEmpty {
             ResultsList(groups: scanService.groups, members: scanService.membersByID, selection: $selection)
         } else if scanService.summary != nil {
@@ -224,22 +231,48 @@ private struct SourcesView: View {
     }
 }
 
-/// Live scan header + groups as they arrive (UI_SPEC.md §5). Indeterminate bar for now —
-/// determinate progress needs processed/total counts threaded through ScanService (T4.3 full).
+/// Live scan header + groups as they arrive (UI_SPEC.md §5, F2). Determinate bar with a phase/count
+/// label once counts are known; indeterminate during enumeration. Live groups + reclaimable counters.
 private struct ScanProgressView: View {
     let phase: ScanPhase?
+    let processed: Int
+    let total: Int?
     let groups: [DuplicateGroup]
     let members: [Int64: FileRecord]
     @Binding var selection: Set<Int64>
 
+    /// Space that would be freed if every non-keeper found so far were trashed (sum of their sizes).
+    private var reclaimable: Int64 {
+        groups.reduce(0) { acc, group in
+            acc + group.memberFileIDs
+                .filter { $0 != group.keeperFileID }
+                .reduce(0) { $0 + (members[$1]?.sizeBytes ?? 0) }
+        }
+    }
+
+    /// "Hashing 12 / 50" when countable, else the phase name, else a generic label.
+    private var label: String {
+        guard let phase else { return "Scanning…" }
+        let name = phase.rawValue.capitalized
+        if let total, total > 0 { return "\(name) \(processed.formatted()) / \(total.formatted())" }
+        return name + "…"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                ProgressView().controlSize(.small)
-                Text(phase.map { $0.rawValue.capitalized + "…" } ?? "Scanning…")
-                    .font(.headline)
-                Spacer()
-                Text("\(groups.count) groups").foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(label).font(.headline)
+                    Spacer()
+                    Text("\(groups.count) groups · \(reclaimable.formatted(.byteCount(style: .file))) reclaimable")
+                        .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                }
+                // Determinate where countable (phase known + total>0); indeterminate during enumeration.
+                if let total, total > 0, phase != nil {
+                    ProgressView(value: Double(min(processed, total)), total: Double(total))
+                } else {
+                    ProgressView().progressViewStyle(.linear)
+                }
             }
             .padding(.horizontal)
             ResultsList(groups: groups, members: members, selection: $selection)
