@@ -53,12 +53,16 @@ struct RootView: View {
         } detail: {
             InspectorPlaceholder()
         }
+        .task {
+            // Re-resolve remembered folders so they're scannable without re-prompting (T4.2).
+            do { try await scanService.loadSources() } catch { scanError = error.localizedDescription }
+        }
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: [.folder],
             allowsMultipleSelection: true
         ) { result in
-            if case let .success(urls) = result, !urls.isEmpty { startScan(urls) }
+            if case let .success(urls) = result, !urls.isEmpty { addAndScan(urls) }
         }
         .alert("Scan failed", isPresented: .init(
             get: { scanError != nil },
@@ -77,6 +81,13 @@ struct RootView: View {
             ResultsList(groups: scanService.groups, members: scanService.membersByID, selection: $selection)
         } else if scanService.summary != nil {
             ContentUnavailableView("No duplicates found 🎉", systemImage: "checkmark.seal")
+        } else if !scanService.sources.isEmpty {
+            SourcesView(
+                sources: scanService.sources,
+                onScan: scanSources,
+                onAdd: { showImporter = true },
+                onRemove: removeSource
+            )
         } else {
             ContentUnavailableView {
                 Label("Choose folders to find duplicates", systemImage: "folder.badge.plus")
@@ -128,18 +139,35 @@ struct RootView: View {
         }
     }
 
-    private func startScan(_ urls: [URL]) {
-        // ScanService owns security-scoped access for the results' lifetime (so files stay trashable).
+    /// Persist the picked folders as sources (so they survive relaunch), then scan them.
+    private func addAndScan(_ urls: [URL]) {
+        Task {
+            do { try await scanService.addSources(urls) } catch { scanError = error.localizedDescription; return }
+            scanSources()
+        }
+    }
+
+    /// Scan every remembered source, tying the session to those sources' bookmark ids.
+    private func scanSources() {
+        let roots = scanService.sources.map(\.url)
+        let bookmarkIDs = scanService.sources.map(\.id)
+        guard !roots.isEmpty else { return }
         selection = []
         scanTask = Task {
             do {
-                try await scanService.startScan(ScanRequest(roots: urls, scopes: [.document]))
+                try await scanService.startScan(ScanRequest(roots: roots, scopes: [.document]), rootBookmarkIDs: bookmarkIDs)
             } catch is CancellationError {
                 // Expected when the user hits Cancel; ScanService still finalizes the session.
             } catch {
                 scanError = error.localizedDescription
             }
             scanTask = nil
+        }
+    }
+
+    private func removeSource(_ id: Int64) {
+        Task {
+            do { try await scanService.removeSource(id: id) } catch { scanError = error.localizedDescription }
         }
     }
 
@@ -160,6 +188,41 @@ struct RootView: View {
 }
 
 enum SidebarItem: Hashable { case sources, scans }
+
+/// Remembered source folders (T4.2): the list persists across launches so the user re-scans without
+/// re-picking. Add/remove here; scanning runs over all sources.
+private struct SourcesView: View {
+    let sources: [ScanService.Source]
+    let onScan: () -> Void
+    let onAdd: () -> Void
+    let onRemove: (Int64) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            List(sources) { source in
+                HStack {
+                    Label(source.displayPath, systemImage: "folder")
+                        .truncationMode(.middle).lineLimit(1)
+                    Spacer()
+                    Button {
+                        onRemove(source.id)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary)
+                    .help("Forget this folder")
+                }
+            }
+            HStack {
+                Button("Add Folders…", action: onAdd)
+                Spacer()
+                Button("Scan", action: onScan)
+                    .buttonStyle(.borderedProminent)
+            }
+            .padding()
+        }
+    }
+}
 
 /// Live scan header + groups as they arrive (UI_SPEC.md §5). Indeterminate bar for now —
 /// determinate progress needs processed/total counts threaded through ScanService (T4.3 full).
