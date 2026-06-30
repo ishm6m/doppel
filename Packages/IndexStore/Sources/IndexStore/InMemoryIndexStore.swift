@@ -77,7 +77,7 @@ public actor InMemoryIndexStore: IndexStoring {
     }
 
     /// Groups
-    public func saveGroup(_ group: DuplicateGroup, members: [Int64], edges: [MatchEdge]) async throws -> Int64 {
+    public func saveGroup(_ group: DuplicateGroup, members: [Int64], edges: [MatchEdge], sessionID: Int64) async throws -> Int64 {
         let id = group.id == 0 ? makeID() : group.id
         var g = group
         g = DuplicateGroup(
@@ -90,12 +90,12 @@ public actor InMemoryIndexStore: IndexStoring {
             ignored: group.ignored,
             createdAt: group.createdAt
         )
-        groupsByID[id] = StoredGroup(group: g, members: members, edges: edges, sessionID: 0)
+        groupsByID[id] = StoredGroup(group: g, members: members, edges: edges, sessionID: sessionID)
         return id
     }
 
-    public func groups(sessionID _: Int64) async throws -> [DuplicateGroup] {
-        groupsByID.values.map(\.group).sorted { $0.id < $1.id }
+    public func groups(sessionID: Int64) async throws -> [DuplicateGroup] {
+        groupsByID.values.filter { $0.sessionID == sessionID }.map(\.group).sorted { $0.id < $1.id }
     }
 
     public func setKeeper(groupID: Int64, fileID: Int64) async throws {
