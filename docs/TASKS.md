@@ -43,7 +43,7 @@
 - [x] **T5.4** Ignore group / not-duplicates persistence (F7/F14). DoD met: "Not duplicates" on each group persists its member pairs (`ignore_pair`) + marks the group ignored, removes it from the live results, and a re-scan that re-finds the same set drops it before it surfaces (`testIgnoredGroupDoesNotRecurOnRescan`). Surfaced groups now carry the store-assigned id (engine emits 0). ponytail: recurrence keyed by `FileRecord.id` (stable while enumeration order is) — content-hash key is the cross-rescan upgrade.
 
 ## Milestone 6 — Onboarding, Settings, History
-- [ ] **T6.1** Onboarding flow (F10). DoD: shown once, accessible.
+- [x] **T6.1** Onboarding flow (F10). DoD met: 3-page native sheet (privacy guarantee → content-aware → choose folders), skippable, shown once via `@AppStorage("onboardingComplete")`, leads into F1 folder selection; native controls + accessibility labels.
 - [ ] **T6.2** Settings scene: General/Detection/Model/Ignore/About (F11). DoD: toggles affect engine.
 - [ ] **T6.3** Scan history sidebar + reopen (F12). DoD: F12 acceptance.
 
