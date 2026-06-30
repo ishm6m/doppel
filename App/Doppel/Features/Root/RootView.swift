@@ -88,10 +88,17 @@ struct RootView: View {
                 groups: scanService.groups,
                 members: scanService.membersByID,
                 selection: $selection,
-                onCompare: compare
+                onCompare: compare,
+                onIgnore: ignoreGroup
             )
         } else if !scanService.groups.isEmpty {
-            ResultsList(groups: scanService.groups, members: scanService.membersByID, selection: $selection, onCompare: compare)
+            ResultsList(
+                groups: scanService.groups,
+                members: scanService.membersByID,
+                selection: $selection,
+                onCompare: compare,
+                onIgnore: ignoreGroup
+            )
         } else if scanService.summary != nil {
             ContentUnavailableView("No duplicates found 🎉", systemImage: "checkmark.seal")
         } else if !scanService.sources.isEmpty {
@@ -189,6 +196,12 @@ struct RootView: View {
         comparing = ComparePair(keeper: keeper, other: other)
     }
 
+    private func ignoreGroup(_ group: DuplicateGroup) {
+        Task {
+            do { try await scanService.ignore(group) } catch { scanError = error.localizedDescription }
+        }
+    }
+
     private func trashSelected() {
         let ids = Array(selection)
         showTrashConfirm = false
@@ -252,6 +265,7 @@ private struct ScanProgressView: View {
     let members: [Int64: FileRecord]
     @Binding var selection: Set<Int64>
     let onCompare: (FileRecord, FileRecord) -> Void
+    let onIgnore: (DuplicateGroup) -> Void
 
     /// Space that would be freed if every non-keeper found so far were trashed (sum of their sizes).
     private var reclaimable: Int64 {
@@ -287,7 +301,7 @@ private struct ScanProgressView: View {
                 }
             }
             .padding(.horizontal)
-            ResultsList(groups: groups, members: members, selection: $selection, onCompare: onCompare)
+            ResultsList(groups: groups, members: members, selection: $selection, onCompare: onCompare, onIgnore: onIgnore)
         }
         .padding(.top)
     }
@@ -299,10 +313,11 @@ private struct ResultsList: View {
     let members: [Int64: FileRecord]
     @Binding var selection: Set<Int64>
     let onCompare: (FileRecord, FileRecord) -> Void
+    let onIgnore: (DuplicateGroup) -> Void
 
     var body: some View {
         List(groups) { group in
-            GroupCard(group: group, members: members, selection: $selection, onCompare: onCompare)
+            GroupCard(group: group, members: members, selection: $selection, onCompare: onCompare, onIgnore: onIgnore)
         }
     }
 }
@@ -312,6 +327,7 @@ private struct GroupCard: View {
     let members: [Int64: FileRecord]
     @Binding var selection: Set<Int64>
     let onCompare: (FileRecord, FileRecord) -> Void
+    let onIgnore: (DuplicateGroup) -> Void
     @State private var isExpanded = false
 
     private var nonKeeperIDs: [Int64] {
@@ -325,9 +341,16 @@ private struct GroupCard: View {
 
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
-            Button("Select all but keeper") { selection.formUnion(nonKeeperIDs) }
-                .font(.caption).buttonStyle(.link)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Button("Select all but keeper") { selection.formUnion(nonKeeperIDs) }
+                    .buttonStyle(.link)
+                Spacer()
+                // F7/F14: mark this set "not duplicates" — it leaves the list and won't recur.
+                Button("Not duplicates") { onIgnore(group) }
+                    .buttonStyle(.link).foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .frame(maxWidth: .infinity, alignment: .leading)
             // ponytail: rows resolve from the in-memory member map; a file we somehow didn't retain
             // is skipped rather than crashing. Member IDs are unique per scan, so order is stable.
             ForEach(group.memberFileIDs, id: \.self) { id in
