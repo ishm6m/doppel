@@ -47,3 +47,20 @@ jobs:
             echo "::error::Use Trash (trashItem/recycle), never removeItem/unlink on user files"
             exit 1
           fi
+
+      - name: Forbid network egress
+        # Golden rule 1 / T8.4 / SECURITY.md §3: nothing in the engine, store, or app opens a network
+        # connection — no file-derived data can leave. The ONLY permitted egress is the Sparkle update
+        # check, which is added in a separate documented build config when it lands; until then there is
+        # zero networking code, which this proves statically (stronger than one runtime "no connection").
+        # When Sparkle is integrated, scope it to its own file and add it to the exclusion below.
+        run: |
+          if grep -rnE 'URLSession|URLRequest|URLConnection|NWConnection|NWListener|NWPathMonitor|NWBrowser|CFSocket|CFStream|import Network|getaddrinfo|[^a-zA-Z]socket\(|\.dataTask|\.downloadTask|\.uploadTask' --include='*.swift' Packages/*/Sources App; then
+            echo "::error::No networking allowed (privacy is the product). Only Sparkle may connect, in its own scoped build config."
+            exit 1
+          fi
+          # No network entitlement in the app sandbox (SECURITY.md §3).
+          if grep -nE 'com\.apple\.security\.network\.(client|server)' App/Doppel/Resources/Doppel.entitlements; then
+            echo "::error::App must not request the network entitlement"
+            exit 1
+          fi
