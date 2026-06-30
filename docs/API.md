@@ -148,6 +148,8 @@ Registry pattern: `ExtractorRegistry` picks the right extractor by `ContentKind`
 ## 5. App service layer: `ScanService` (MainActor-facing)
 Thin adapter the ViewModels use: wraps `ScanCoordinating` + `IndexStoring`, exposes `@Observable` state and high-level intents (`startScan`, `cancel`, `deepScan`, `trash(ids:)`, `undoLastDeletion`, `ignore(group:)`). Handles security-scoped resource access lifecycle. See `STATE_MANAGEMENT.md`.
 
+**Lives in a package, not the app target.** `ScanService` ships in `Packages/DoppelCore` (depends on engine + store, no SwiftUI) rather than the App target — so it's unit-testable via `swift test` without an Xcode test host, and shareable with the future CLI. The App imports `DoppelCore`. **Implemented so far:** `startScan(_:rootBookmarkIDs:)` — creates the session, persists group members + groups (tagged with the session) as events stream in, finalizes the session (`.finished`/`.cancelled`) with the authoritative summary; exposes `groups`/`phase`/`summary`. **Pending:** `cancel`, `deepScan`, `trash`/`undo`, `ignore`, security-scoped access (arrive with their UI tasks). Persists group/skipped files only, not a full inventory; edges not yet threaded (no compare view).
+
 ## Open Questions
 - Should `deepScan` reuse cached embeddings across sessions? (Yes, once stable — keyed by `modelID`.)
 
