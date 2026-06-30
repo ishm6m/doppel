@@ -70,6 +70,9 @@ final class ScanServiceTests: XCTestCase {
         // Observable state mirrors what the UI would render.
         XCTAssertEqual(svc.groups.count, 1)
         XCTAssertEqual(svc.summary?.bytesReclaimable, 10)
+        // Member records retained for the results UI to render rows.
+        XCTAssertEqual(svc.membersByID[1]?.displayName, "a.txt")
+        XCTAssertEqual(svc.membersByID[2]?.displayName, "b.txt")
     }
 
     /// A cancelled scan finalizes the session as `.cancelled` (terminal state still recorded).
