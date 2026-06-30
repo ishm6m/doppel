@@ -169,9 +169,11 @@ struct RootView: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
-        if !isScanning, !scanService.sources.isEmpty {
+        if !isScanning, !scanService.sources.isEmpty, env.embedding.isSemantic {
             ToolbarItem(placement: .secondaryAction) {
-                // Opt-in semantic tier (F6/T7.3). Confirms first (battery note) so it never runs by surprise.
+                // Opt-in semantic tier (F6/T7.3). Hidden until a real model is pinned (T7.4) so the
+                // stub's non-meaningful vectors never surface as "semantic" matches. Confirms first
+                // (battery note) so it never runs by surprise.
                 Button { showDeepScanConfirm = true } label: {
                     Label("Deep Scan", systemImage: "sparkle.magnifyingglass")
                 }
