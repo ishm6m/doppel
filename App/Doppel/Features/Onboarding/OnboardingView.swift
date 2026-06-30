@@ -20,17 +20,20 @@ struct OnboardingView: View {
         Page(
             symbol: "lock.shield",
             title: "Everything stays on your Mac",
-            body: "\(AppInfo.productName) reads your files entirely on-device. Nothing — no file, name, path, or fingerprint — is ever uploaded."
+            body: "\(AppInfo.productName) reads your files entirely on-device. "
+                + "Nothing — no file, name, path, or fingerprint — is ever uploaded."
         ),
         Page(
             symbol: "doc.on.doc",
             title: "Finds real duplicates",
-            body: "It understands content, not just names and sizes — so it catches the same document saved twice, even with a different filename or a changed date."
+            body: "It understands content, not just names and sizes — so it catches the same "
+                + "document saved twice, even with a different filename or a changed date."
         ),
         Page(
             symbol: "folder.badge.plus",
             title: "Choose folders to begin",
-            body: "Pick the folders to scan. You stay in control: \(AppInfo.productName) only ever suggests what to remove, and deletions go to the Trash."
+            body: "Pick the folders to scan. You stay in control: \(AppInfo.productName) only "
+                + "ever suggests what to remove, and deletions go to the Trash."
         )
     ]
 
