@@ -38,8 +38,8 @@
 
 ## Milestone 5 — Compare & safe delete (trust core)
 - [x] **T5.1** Text diff engine (word) + compare view (F8). DoD met: `TextDiff` (stdlib CollectionDifference) flags changed words per side; `CompareView` renders two panes with changed words highlighted; "Compare" affordance on each non-keeper row diffs it against the keeper. Contract-date demo proven by `testTextDiffHighlightsOnlyTheChangedWord`. (Diffs the *normalized* text the engine matched on; original-formatting compare deferred.)
-- [ ] **T5.2** Safe deletion: Trash-only + confirmation sheet + multi-select + select-all-but-keeper (F9). DoD: files go to Trash; lint/test forbids `removeItem` on user files.
-- [ ] **T5.3** Undo (⌘Z / Edit menu) restoring from Trash. DoD: F9 acceptance.
+- [x] **T5.2** Safe deletion: Trash-only + confirmation sheet + multi-select + select-all-but-keeper (F9). DoD met: `trash()` uses `FileManager.trashItem` only (CI grep forbids `removeItem`/`unlink` on user files); confirmation sheet summarizes count + bytes; bulk-action bar multi-select; per-group "Select all but keeper"; per-file failures no longer abort the batch and leave the index consistent (`testTrashContinuesPastAMissingFileAndStaysConsistent`).
+- [x] **T5.3** Undo (⌘Z / Edit menu) restoring from Trash. DoD met: Edit ▸ Undo Delete (⌘Z) + toolbar affordance call `undoLastTrash()`, moving files back from the Trash and restoring live results (`testTrashMovesNonKeeperToTrashAndUpdatesState` covers the round-trip). Single-level undo (ponytail).
 - [ ] **T5.4** Ignore group / not-duplicates persistence (F7/F14). DoD: ignored group doesn't recur.
 
 ## Milestone 6 — Onboarding, Settings, History

@@ -149,6 +149,47 @@ final class ScanServiceTests: XCTestCase {
         XCTAssertFalse(svc.canUndoTrash, "undo consumed")
     }
 
+    /// Partial-failure consistency (F9): trashing a set where one file is already gone trashes the
+    /// reachable one, skips the missing one, and leaves the index consistent — the batch isn't aborted
+    /// and no file is half-deleted (on disk but still marked live, or vice-versa).
+    func testTrashContinuesPastAMissingFileAndStaysConsistent() async throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmp) } // fixture cleanup — our dir
+        let keeper = tmp.appendingPathComponent("a.txt")
+        let dupe1 = tmp.appendingPathComponent("b.txt")
+        let dupe2 = tmp.appendingPathComponent("c.txt")
+        for url in [keeper, dupe1, dupe2] {
+            try "dup".write(to: url, atomically: true, encoding: .utf8)
+        }
+
+        let store = InMemoryIndexStore()
+        let group = DuplicateGroup(
+            id: 0, matchType: .exact, confidence: 1.0,
+            explanation: "Identical file contents", keeperFileID: 1, memberFileIDs: [1, 2, 3]
+        )
+        let svc = ScanService(coordinator: StubCoordinator(events: [
+            .groupFound(group, members: [file(1, "a.txt"), file(2, "b.txt"), file(3, "c.txt")]),
+            .finished(summary: ScanSummary(filesDiscovered: 3, groupsFound: 1))
+        ]), store: store)
+        try await svc.startScan(ScanRequest(roots: [tmp], scopes: [.document]))
+
+        // c.txt vanishes before we trash — trashItem will throw for it.
+        try fm.removeItem(at: dupe2)
+
+        let trashed = try await svc.trash([2, 3])
+        XCTAssertEqual(trashed, [2], "only the reachable dupe is trashed")
+        XCTAssertFalse(fm.fileExists(atPath: dupe1.path), "b.txt went to Trash")
+        XCTAssertNil(svc.membersByID[2], "trashed file left the results")
+        XCTAssertNotNil(svc.membersByID[3], "the missing file stays visible (not silently dropped)")
+        // Index agrees: only id 2 is marked deleted (.skipped); the missing file is untouched.
+        let status2 = try await store.file(id: 2)?.status
+        let status3 = try await store.file(id: 3)?.status
+        XCTAssertEqual(status2, .skipped)
+        XCTAssertEqual(status3, .indexed)
+    }
+
     /// Source folders are persisted on add and re-resolved by a fresh service from the same store,
     /// so folder access survives relaunch (T4.2). Identity bookmark codecs stand in for the
     /// security-scoped APIs, which need the app sandbox that `swift test` lacks.
