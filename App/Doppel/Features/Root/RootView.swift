@@ -17,6 +17,8 @@ struct RootView: View {
     @State private var showTrashConfirm = false
     /// The keeper/other pair the user asked to compare (F8), shown in a sheet. Nil when closed.
     @State private var comparing: ComparePair?
+    /// First-launch onboarding gate (F10): shown once, then persisted so it never reappears.
+    @AppStorage("onboardingComplete") private var onboardingComplete = false
 
     private var scanService: ScanService {
         env.scanService
@@ -54,6 +56,13 @@ struct RootView: View {
                 }
                 .sheet(item: $comparing) { pair in
                     CompareView(pair: pair) { await scanService.compareTexts($0, $1) }
+                }
+                .sheet(isPresented: .init(get: { !onboardingComplete }, set: { if $0 { onboardingComplete = false } })) {
+                    OnboardingView { chooseFolders in
+                        onboardingComplete = true
+                        if chooseFolders { showImporter = true }
+                    }
+                    .interactiveDismissDisabled()
                 }
         } detail: {
             InspectorPlaceholder()
