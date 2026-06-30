@@ -89,4 +89,36 @@ final class ScanServiceTests: XCTestCase {
         XCTAssertEqual(session?.state, .cancelled)
         XCTAssertTrue(svc.groups.isEmpty)
     }
+
+    /// trash() moves the chosen files to the Trash (not unlinked), leaves the keeper, marks them
+    /// deleted, and drops the now-singleton group. Uses real files in a temp dir.
+    func testTrashMovesNonKeeperToTrashAndUpdatesState() async throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tmp) } // test fixture cleanup — our dir, not user files
+        let keeper = tmp.appendingPathComponent("a.txt")
+        let dupe = tmp.appendingPathComponent("b.txt")
+        try "dup".write(to: keeper, atomically: true, encoding: .utf8)
+        try "dup".write(to: dupe, atomically: true, encoding: .utf8)
+
+        let store = InMemoryIndexStore()
+        // file(id,name) gives bookmarkID 0 + relativePath == name, so root[0]+name resolves the URL.
+        let group = DuplicateGroup(
+            id: 0, matchType: .exact, confidence: 1.0,
+            explanation: "Identical file contents", keeperFileID: 1, memberFileIDs: [1, 2]
+        )
+        let svc = ScanService(coordinator: StubCoordinator(events: [
+            .groupFound(group, members: [file(1, "a.txt"), file(2, "b.txt")]),
+            .finished(summary: ScanSummary(filesDiscovered: 2, groupsFound: 1, bytesReclaimable: 3))
+        ]), store: store)
+        try await svc.startScan(ScanRequest(roots: [tmp], scopes: [.document]))
+
+        let trashed = try await svc.trash([2])
+        XCTAssertEqual(trashed, [2])
+        XCTAssertTrue(fm.fileExists(atPath: keeper.path), "keeper stays")
+        XCTAssertFalse(fm.fileExists(atPath: dupe.path), "non-keeper moved to Trash")
+        XCTAssertNil(svc.membersByID[2])
+        XCTAssertTrue(svc.groups.isEmpty, "singleton group removed")
+    }
 }

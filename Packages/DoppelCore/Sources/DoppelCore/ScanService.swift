@@ -24,6 +24,13 @@ public final class ScanService {
     /// Authoritative summary, set when the scan terminates.
     public private(set) var summary: ScanSummary?
 
+    /// Source roots of the current scan, indexed by `FileRecord.bookmarkID`, for path reconstruction.
+    private var rootURLs: [URL] = []
+    /// Roots we hold security-scoped access to. Kept open past scan end so the results can be acted on
+    /// (e.g. trashed); released when the next scan starts. ponytail: not released on deinit — the OS
+    /// reclaims at process exit; persist bookmarks (T4.2) when access must survive relaunch.
+    private var scopedRoots: [URL] = []
+
     public init(coordinator: any ScanCoordinating, store: any IndexStoring) {
         self.coordinator = coordinator
         self.store = store
@@ -36,6 +43,12 @@ public final class ScanService {
         let sessionID = try await store.createSession(
             ScanSession(id: 0, rootBookmarkIDs: rootBookmarkIDs, scopes: request.scopes)
         )
+        // Take security-scoped access for the whole results lifetime (sandbox); release the prior scan's.
+        for url in scopedRoots {
+            url.stopAccessingSecurityScopedResource()
+        }
+        rootURLs = request.roots
+        scopedRoots = request.roots.filter { $0.startAccessingSecurityScopedResource() }
         groups = []
         membersByID = [:]
         phase = nil
@@ -83,5 +96,42 @@ public final class ScanService {
             state: state
         ))
         return sessionID
+    }
+
+    /// On-disk URL for a member file, rebuilt from its source root + relative path.
+    public func absoluteURL(for file: FileRecord) -> URL? {
+        let idx = Int(file.bookmarkID)
+        guard rootURLs.indices.contains(idx) else { return nil }
+        return rootURLs[idx].appendingPathComponent(file.relativePath)
+    }
+
+    /// Moves the given member files to the Trash — never `removeItem`/`unlink`, so every deletion is
+    /// recoverable (golden rule 2). We trash exactly the ids asked; the human chose them. Returns the
+    /// ids actually trashed. After trashing, members drop from the live results and groups that fall
+    /// below two members disappear (no longer a duplicate set).
+    @discardableResult
+    public func trash(_ ids: [Int64]) async throws -> [Int64] {
+        let fm = FileManager.default
+        var trashed: [Int64] = []
+        for id in ids {
+            guard let file = membersByID[id], let url = absoluteURL(for: file) else { continue }
+            try fm.trashItem(at: url, resultingItemURL: nil)
+            trashed.append(id)
+        }
+        guard !trashed.isEmpty else { return [] }
+        try await store.markDeleted(ids: trashed)
+        let gone = Set(trashed)
+        for id in gone {
+            membersByID[id] = nil
+        }
+        groups = groups.compactMap { group in
+            let remaining = group.memberFileIDs.filter { !gone.contains($0) }
+            guard remaining.count >= 2 else { return nil }
+            var updated = group
+            updated.memberFileIDs = remaining
+            if gone.contains(group.keeperFileID) { updated.keeperFileID = remaining[0] }
+            return updated
+        }
+        return trashed
     }
 }
