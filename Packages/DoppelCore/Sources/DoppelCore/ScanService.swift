@@ -21,6 +21,11 @@ public final class ScanService {
     public private(set) var membersByID: [Int64: FileRecord] = [:]
     /// Latest progress phase, for the scan header. Nil before the first scan.
     public private(set) var phase: ScanPhase?
+    /// Items processed in the current phase, for the determinate progress bar (F2 "Hashing 12 / 50").
+    public private(set) var processed = 0
+    /// Total items for the current phase, or nil while indeterminate (enumeration). Seeded by
+    /// `.discovered` and refined by each `.progress` event.
+    public private(set) var total: Int?
     /// Authoritative summary, set when the scan terminates.
     public private(set) var summary: ScanSummary?
 
@@ -154,6 +159,8 @@ public final class ScanService {
         groups = []
         membersByID = [:]
         phase = nil
+        processed = 0
+        total = nil
         summary = nil
         lastTrash = nil
 
@@ -161,10 +168,13 @@ public final class ScanService {
         var state: ScanState = .finished
         for try await event in coordinator.scan(request) {
             switch event {
-            case .discovered:
-                break
-            case let .progress(phase, _, _):
+            case let .discovered(total):
+                // Enumeration count; the bar stays indeterminate (phase nil) until the first phase tick.
+                self.total = total
+            case let .progress(phase, processed, total):
                 self.phase = phase
+                self.processed = processed
+                if let total { self.total = total }
             case let .groupFound(group, members):
                 // ponytail: persist the group's members + the group. We do NOT persist a full file
                 // inventory — the engine only emits grouped/skipped files, which is all the results
