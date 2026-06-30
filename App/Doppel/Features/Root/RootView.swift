@@ -15,6 +15,8 @@ struct RootView: View {
     /// File ids the user has checked for deletion. Never pre-populated (golden rule 3).
     @State private var selection: Set<Int64> = []
     @State private var showTrashConfirm = false
+    /// The keeper/other pair the user asked to compare (F8), shown in a sheet. Nil when closed.
+    @State private var comparing: ComparePair?
 
     private var scanService: ScanService {
         env.scanService
@@ -50,6 +52,9 @@ struct RootView: View {
                         showTrashConfirm = false
                     }
                 }
+                .sheet(item: $comparing) { pair in
+                    CompareView(pair: pair) { await scanService.compareTexts($0, $1) }
+                }
         } detail: {
             InspectorPlaceholder()
         }
@@ -82,10 +87,11 @@ struct RootView: View {
                 total: scanService.total,
                 groups: scanService.groups,
                 members: scanService.membersByID,
-                selection: $selection
+                selection: $selection,
+                onCompare: compare
             )
         } else if !scanService.groups.isEmpty {
-            ResultsList(groups: scanService.groups, members: scanService.membersByID, selection: $selection)
+            ResultsList(groups: scanService.groups, members: scanService.membersByID, selection: $selection, onCompare: compare)
         } else if scanService.summary != nil {
             ContentUnavailableView("No duplicates found 🎉", systemImage: "checkmark.seal")
         } else if !scanService.sources.isEmpty {
@@ -178,6 +184,10 @@ struct RootView: View {
         }
     }
 
+    private func compare(_ keeper: FileRecord, _ other: FileRecord) {
+        comparing = ComparePair(keeper: keeper, other: other)
+    }
+
     private func trashSelected() {
         let ids = Array(selection)
         showTrashConfirm = false
@@ -240,6 +250,7 @@ private struct ScanProgressView: View {
     let groups: [DuplicateGroup]
     let members: [Int64: FileRecord]
     @Binding var selection: Set<Int64>
+    let onCompare: (FileRecord, FileRecord) -> Void
 
     /// Space that would be freed if every non-keeper found so far were trashed (sum of their sizes).
     private var reclaimable: Int64 {
@@ -275,7 +286,7 @@ private struct ScanProgressView: View {
                 }
             }
             .padding(.horizontal)
-            ResultsList(groups: groups, members: members, selection: $selection)
+            ResultsList(groups: groups, members: members, selection: $selection, onCompare: onCompare)
         }
         .padding(.top)
     }
@@ -286,10 +297,11 @@ private struct ResultsList: View {
     let groups: [DuplicateGroup]
     let members: [Int64: FileRecord]
     @Binding var selection: Set<Int64>
+    let onCompare: (FileRecord, FileRecord) -> Void
 
     var body: some View {
         List(groups) { group in
-            GroupCard(group: group, members: members, selection: $selection)
+            GroupCard(group: group, members: members, selection: $selection, onCompare: onCompare)
         }
     }
 }
@@ -298,6 +310,7 @@ private struct GroupCard: View {
     let group: DuplicateGroup
     let members: [Int64: FileRecord]
     @Binding var selection: Set<Int64>
+    let onCompare: (FileRecord, FileRecord) -> Void
     @State private var isExpanded = false
 
     private var nonKeeperIDs: [Int64] {
@@ -324,7 +337,11 @@ private struct GroupCard: View {
                         isSelected: Binding(
                             get: { selection.contains(id) },
                             set: { if $0 { selection.insert(id) } else { selection.remove(id) } }
-                        )
+                        ),
+                        // Compare a non-keeper against the keeper — the "why did these match?" view (F8).
+                        onCompare: id == group.keeperFileID ? nil : members[group.keeperFileID].map { keeper in
+                            { onCompare(keeper, file) }
+                        }
                     )
                 }
             }
@@ -378,6 +395,8 @@ private struct MemberRow: View {
     let file: FileRecord
     let isKeeper: Bool
     @Binding var isSelected: Bool
+    /// Opens the compare view against the keeper; nil for the keeper row itself.
+    let onCompare: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -393,8 +412,92 @@ private struct MemberRow: View {
                     .truncationMode(.middle).lineLimit(1)
             }
             Spacer()
+            if let onCompare {
+                Button("Compare", systemImage: "rectangle.split.2x1", action: onCompare)
+                    .labelStyle(.iconOnly).buttonStyle(.borderless)
+                    .help("Compare with the suggested keeper")
+            }
             Text(file.sizeBytes.formatted(.byteCount(style: .file)))
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// A keeper/other pair queued for side-by-side comparison (F8).
+private struct ComparePair: Identifiable {
+    let keeper: FileRecord
+    let other: FileRecord
+    var id: String {
+        "\(keeper.id)-\(other.id)"
+    }
+}
+
+/// Side-by-side text compare with changed words highlighted — the trust builder (F8): shows two
+/// files are the same document except for, e.g., a date. Diff is computed off the main actor via the
+/// injected `diff` closure (reads + extracts both files); panes render normalized text.
+private struct CompareView: View {
+    let pair: ComparePair
+    let diff: (FileRecord, FileRecord) async -> TextDiff?
+    @Environment(\.dismiss) private var dismiss
+    @State private var result: TextDiff?
+    @State private var loaded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Compare").font(.headline)
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            if let result {
+                if result.isIdentical {
+                    Label("Text is identical", systemImage: "equal.circle")
+                        .foregroundStyle(.secondary)
+                }
+                HStack(alignment: .top, spacing: 12) {
+                    pane(pair.keeper, tokens: result.left, keeper: true)
+                    Divider()
+                    pane(pair.other, tokens: result.right, keeper: false)
+                }
+            } else if loaded {
+                ContentUnavailableView(
+                    "Can't compare these files",
+                    systemImage: "doc.questionmark",
+                    description: Text("One of them has no readable text (e.g. a scanned PDF).")
+                )
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .padding()
+        .frame(width: 720, height: 480)
+        .task {
+            result = await diff(pair.keeper, pair.other)
+            loaded = true
+        }
+    }
+
+    private func pane(_ file: FileRecord, tokens: [DiffToken], keeper: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(file.displayName, systemImage: keeper ? "star.fill" : "doc")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(keeper ? .primary : .secondary)
+                .lineLimit(1).truncationMode(.middle)
+            ScrollView {
+                highlighted(tokens)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Renders the token stream as one wrapping Text, changed words on a yellow background.
+    private func highlighted(_ tokens: [DiffToken]) -> Text {
+        tokens.reduce(Text("")) { acc, token in
+            var word = AttributedString(String(token.text) + " ")
+            if token.changed { word.backgroundColor = .yellow.opacity(0.5) }
+            return acc + Text(word)
         }
     }
 }
