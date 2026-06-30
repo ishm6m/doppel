@@ -304,6 +304,11 @@ private struct GroupCard: View {
         group.memberFileIDs.filter { $0 != group.keeperFileID }
     }
 
+    /// Space freed if every non-keeper in this group is trashed (F7 per-group reclaimable size).
+    private var reclaimable: Int64 {
+        nonKeeperIDs.reduce(0) { $0 + (members[$1]?.sizeBytes ?? 0) }
+    }
+
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
             Button("Select all but keeper") { selection.formUnion(nonKeeperIDs) }
@@ -340,7 +345,7 @@ private struct GroupCard: View {
                 Text("\(Int(group.confidence * 100))% confidence")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text("\(group.memberFileIDs.count) files")
+                Text("\(group.memberFileIDs.count) files · \(reclaimable.formatted(.byteCount(style: .file))) reclaimable")
                     .font(.caption).foregroundStyle(.secondary)
             }
             // Golden rule 4: every group carries a human-readable reason.
