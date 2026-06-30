@@ -30,7 +30,9 @@ final class AppEnvironment {
     /// Live wiring. The GRDB store path lives in Application Support (DATA_MODEL.md §1).
     static func live() -> AppEnvironment {
         let store: any IndexStoring = makeStore()
-        return AppEnvironment(store: store, coordinator: ScanCoordinator(), embedding: StubEmbeddingProvider())
+        // One provider instance, shared so the coordinator embeds with exactly what the Model tab shows.
+        let embedding = StubEmbeddingProvider()
+        return AppEnvironment(store: store, coordinator: ScanCoordinator(embedding: embedding), embedding: embedding)
     }
 
     static func preview() -> AppEnvironment {

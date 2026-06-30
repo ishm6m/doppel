@@ -96,6 +96,86 @@ final class SemanticTests: XCTestCase {
         let out = try await SemanticStage(provider: provider).group([input(1, "solo.txt")])
         XCTAssertTrue(out.edges.isEmpty)
     }
+
+    /// Coordinator wiring (T7.2): deep scan is OPT-IN. The SAME two textually-distinct files yield no
+    /// group on a normal scan, but one `.semantic` group when `config.deepScan` is on — proving the
+    /// tier runs only on demand and folds into the single clustering pass. A controlled provider makes
+    /// every embedded survivor near-parallel, so the assertion is deterministic without a real model.
+    func testDeepScanIsOptInAndFoldsSemanticGroups() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        // Distinct, non-near-dup contents (Jaccard 0, not identical) → no exact/near edge on a fast scan.
+        try Data("the quick brown fox jumps over".utf8).write(to: dir.appendingPathComponent("a.txt"))
+        try Data("lorem ipsum dolor sit amet consectetur".utf8).write(to: dir.appendingPathComponent("b.txt"))
+
+        struct AllParallel: EmbeddingProvider {
+            let modelID = "test-parallel"
+            let dimension = 4
+            func embed(text _: String) async throws -> [Float] {
+                [1, 0, 0, 0]
+            } // shared axis → near-parallel
+        }
+        let coordinator = ScanCoordinator(embedding: AllParallel())
+
+        func groups(deepScan: Bool) async throws -> [(DuplicateGroup, [FileRecord])] {
+            let config = DetectionConfig(deepScan: deepScan)
+            var found: [(DuplicateGroup, [FileRecord])] = []
+            for try await e in coordinator.scan(ScanRequest(roots: [dir], scopes: [.document], config: config)) {
+                if case let .groupFound(g, m) = e { found.append((g, m)) }
+            }
+            return found
+        }
+
+        let normal = try await groups(deepScan: false)
+        XCTAssertTrue(normal.isEmpty, "distinct files must not group on a normal (no-embed) scan")
+
+        let deep = try await groups(deepScan: true)
+        XCTAssertEqual(deep.count, 1, "deep scan must surface the semantic group")
+        XCTAssertEqual(deep.first?.0.matchType, .semantic)
+        XCTAssertEqual(deep.first?.0.explanation, "Semantically similar content")
+        XCTAssertEqual(Set(deep.first?.1.map(\.displayName) ?? []), ["a.txt", "b.txt"])
+    }
+
+    /// Deep scan honors golden rule 5: it never embeds a file an earlier stage already resolved. Two
+    /// exact copies + one distinct doc ⇒ the exact pair contributes ONE representative to embedding,
+    /// so the controlled "everything-parallel" provider is asked to embed exactly 2 survivors, not 3.
+    func testDeepScanEmbedsOnlySurvivorsNotResolvedFiles() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data("identical contract text here".utf8).write(to: dir.appendingPathComponent("orig.txt"))
+        try Data("identical contract text here".utf8).write(to: dir.appendingPathComponent("copy.txt")) // exact dup
+        try Data("a totally separate unrelated memo".utf8).write(to: dir.appendingPathComponent("memo.txt"))
+
+        let counter = EmbedCounter()
+        struct Counting: EmbeddingProvider {
+            let modelID = "count"
+            let dimension = 4
+            let counter: EmbedCounter
+            func embed(text _: String) async throws -> [Float] {
+                counter.bump(); return [1, 0, 0, 0]
+            }
+        }
+        let coordinator = ScanCoordinator(embedding: Counting(counter: counter))
+        for try await _ in coordinator.scan(
+            ScanRequest(roots: [dir], scopes: [.document], config: DetectionConfig(deepScan: true))
+        ) {}
+
+        XCTAssertEqual(counter.count, 2, "exact dup must collapse to one survivor before embedding (golden rule 5)")
+    }
+}
+
+private final class EmbedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    func bump() {
+        lock.lock(); n += 1; lock.unlock()
+    }
+
+    var count: Int {
+        lock.lock(); defer { lock.unlock() }; return n
+    }
 }
 
 private final class CompareLog: @unchecked Sendable {

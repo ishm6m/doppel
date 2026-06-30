@@ -10,6 +10,9 @@ public struct DetectionConfig: Sendable {
     public var shingleSize: Int
     public var ocrEnabled: Bool
     public var maxConcurrency: Int
+    /// Opt-in Stage 3 (F6 "Deep scan"). OFF by default so the default scan never embeds (battery).
+    /// When true, the coordinator embeds survivors of the cheaper stages and adds `.semantic` edges.
+    public var deepScan: Bool
 
     public init(
         nearDupTextThreshold: Double = 0.85,
@@ -17,7 +20,8 @@ public struct DetectionConfig: Sendable {
         minhashPermutations: Int = 128,
         shingleSize: Int = 5,
         ocrEnabled: Bool = false,
-        maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount
+        maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount,
+        deepScan: Bool = false
     ) {
         self.nearDupTextThreshold = nearDupTextThreshold
         self.semanticThreshold = semanticThreshold
@@ -25,6 +29,7 @@ public struct DetectionConfig: Sendable {
         self.shingleSize = shingleSize
         self.ocrEnabled = ocrEnabled
         self.maxConcurrency = maxConcurrency
+        self.deepScan = deepScan
     }
 }
 
