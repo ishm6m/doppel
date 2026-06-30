@@ -35,6 +35,8 @@ packages:
     path: Packages/IndexStore
   DetectionEngine:
     path: Packages/DetectionEngine
+  DoppelCore:
+    path: Packages/DoppelCore
 
 targets:
   Doppel:
@@ -46,6 +48,7 @@ targets:
       - package: DoppelKit
       - package: IndexStore
       - package: DetectionEngine
+      - package: DoppelCore
     settings:
       base:
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
