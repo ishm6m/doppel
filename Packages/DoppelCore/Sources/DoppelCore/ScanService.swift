@@ -32,6 +32,21 @@ public final class ScanService {
     /// Past scans, newest first, for the history sidebar (F12). Refreshed on demand + after each scan.
     public private(set) var sessions: [ScanSession] = []
 
+    /// A file the scan couldn't process (corrupt, unreadable, scanned-PDF-needs-OCR, …) paired with why.
+    /// Surfaced as "Skipped (N)" so a bad file is never silently dropped and never fails the scan (T8.1).
+    public struct SkippedFile: Identifiable, Sendable, Hashable {
+        public let file: FileRecord
+        public let issue: FileIssue
+        public var id: Int64 {
+            file.id
+        }
+    }
+
+    /// Files skipped in the current scan, in arrival order. ponytail: in-memory for the live/just-finished
+    /// scan only — not persisted, so reopened history won't list skips. Persist via upsertFiles(status:)
+    /// if history needs them.
+    public private(set) var skipped: [SkippedFile] = []
+
     /// Source roots of the current scan, indexed by `FileRecord.bookmarkID`, for path reconstruction.
     private var rootURLs: [URL] = []
     /// Roots we hold security-scoped access to. Kept open past scan end so the results can be acted on
@@ -165,6 +180,7 @@ public final class ScanService {
         scopedRoots = request.roots.filter { $0.startAccessingSecurityScopedResource() }
         groups = []
         membersByID = [:]
+        skipped = []
         phase = nil
         processed = 0
         total = nil
@@ -185,8 +201,9 @@ public final class ScanService {
                 if let total { self.total = total }
             case let .groupFound(group, members):
                 try await persistFoundGroup(group, members: members, sessionID: sessionID)
-            case .fileSkipped:
-                break
+            case let .fileSkipped(record, issue):
+                // Recorded, never fatal — the scan continues (T8.1 / ERROR_HANDLING.md).
+                skipped.append(SkippedFile(file: record, issue: issue))
             case let .finished(summary):
                 final = summary
             case let .cancelled(summary):
@@ -240,6 +257,7 @@ public final class ScanService {
         }
         groups = saved
         membersByID = members.compactMapValues { $0 }
+        skipped = [] // not persisted; a reopened scan shows groups only
         phase = nil
         summary = nil
         lastTrash = nil
