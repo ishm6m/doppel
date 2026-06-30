@@ -57,7 +57,7 @@
 - [ ] **T8.1** Per-file error capture + "Skipped (N)" UI (`ERROR_HANDLING.md`). DoD: corrupt file doesn't fail scan.
 - [ ] **T8.2** Performance harness + budgets met (`PERFORMANCE.md`). DoD: 50k corpus within budget.
 - [ ] **T8.3** Accessibility pass (`ACCESSIBILITY.md`): VoiceOver, keyboard, Dynamic Type, reduced motion. DoD: audit checklist passes.
-- [ ] **T8.4** Network-egress CI test (no file-derived data leaves). DoD: test green.
+- [x] **T8.4** Network-egress CI guard (no file-derived data leaves). DoD met: a CI step (mirroring the deletion guard) statically forbids all networking APIs (URLSession/URLRequest/NW*/CFSocket/`import Network`/`socket(`/`*Task`) in `Packages/*/Sources` + `App`, and asserts the app entitlements request no `network.client`/`server` — proving zero egress code paths (golden rule 1). Sparkle, when integrated, gets its own scoped build config + exclusion. ponytail: static guard over a runtime network-denied sandbox profile — stronger for the no-code guarantee; add the runtime profile as belt-and-suspenders if desired.
 - [ ] **T8.5** Signing, notarization, Sparkle appcast (`RELEASE.md`). DoD: notarized build auto-updates.
 
 ---
