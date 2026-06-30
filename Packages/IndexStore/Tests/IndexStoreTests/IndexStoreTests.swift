@@ -100,7 +100,7 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
     )
     let savedGroup = try await store.groups(sessionID: ssid).first { $0.id == gid }
     XCTAssertEqual(savedGroup?.memberFileIDs, [11, 21])
-    let otherSession = try await store.createSession(ScanSession(id: 0, scopes: [.document]))
+    let otherSession = try await store.createSession(ScanSession(id: 0, rootBookmarkIDs: [], scopes: [.document]))
     let isolated = try await store.groups(sessionID: otherSession)
     XCTAssertTrue(isolated.isEmpty, "groups are scoped to their owning session")
     try await store.setKeeper(groupID: gid, fileID: 21)
