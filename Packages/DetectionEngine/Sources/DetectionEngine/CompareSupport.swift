@@ -8,7 +8,8 @@ import Foundation
 public func extractNormalizedText(at url: URL) async -> String? {
     let ext = url.pathExtension.lowercased()
     let extractor: ContentExtractor? = PlainTextExtractor.handledExtensions.contains(ext) ? PlainTextExtractor()
-        : PDFTextExtractor.handledExtensions.contains(ext) ? PDFTextExtractor() : nil
+        : PDFTextExtractor.handledExtensions.contains(ext) ? PDFTextExtractor()
+        : DocxTextExtractor.handledExtensions.contains(ext) ? DocxTextExtractor() : nil
     guard let extractor, let content = try? await extractor.extract(url) else { return nil }
     guard let text = content.normalizedText, !text.isEmpty else { return nil }
     return text
