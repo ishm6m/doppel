@@ -30,6 +30,13 @@ final class SemanticTests: XCTestCase {
         Set(records.filter { [edge.pair.a, edge.pair.b].contains($0.id) }.map(\.displayName))
     }
 
+    /// The stub declares itself non-semantic (so the app hides Deep Scan); a real-style provider
+    /// inherits the `true` default. This is the trust signal that keeps golden rule 4 honest.
+    func testStubIsNotSemanticButRealProviderDefaultsTrue() {
+        XCTAssertFalse(StubEmbeddingProvider().isSemantic)
+        XCTAssertTrue(FixedProvider(modelID: "real", dimension: 4, table: [:]).isSemantic)
+    }
+
     /// Known semantic pair (near-parallel vectors) groups; an orthogonal doc does not.
     func testNearParallelVectorsFormOneSemanticEdge() async throws {
         let provider = FixedProvider(modelID: "m1", dimension: 4, table: [
