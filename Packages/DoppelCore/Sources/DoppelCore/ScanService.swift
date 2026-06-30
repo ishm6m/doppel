@@ -47,9 +47,95 @@ public final class ScanService {
         lastTrash != nil
     }
 
-    public init(coordinator: any ScanCoordinating, store: any IndexStoring) {
+    /// A remembered source folder, resolved from a persisted security-scoped bookmark, that the app
+    /// can re-scan across launches without re-prompting the user.
+    public struct Source: Identifiable, Sendable, Hashable {
+        public let id: Int64
+        public let url: URL
+        public let displayPath: String
+    }
+
+    /// Folders the user has added, surviving relaunch (DATA_MODEL.md source_bookmark). We hold
+    /// security-scoped access to each for the app's lifetime so files stay scannable/trashable.
+    public private(set) var sources: [Source] = []
+    private var sourceScoped: [URL] = []
+
+    /// Security-scoped bookmark APIs need the app sandbox, which CI's `swift test` doesn't have, so
+    /// they're injectable seams (live app uses the real ones below). ponytail: a test seam for OS
+    /// sandbox magic, not a general abstraction.
+    private let makeBookmark: @Sendable (URL) throws -> Data
+    private let openBookmark: @Sendable (Data) throws -> URL
+
+    public init(
+        coordinator: any ScanCoordinating,
+        store: any IndexStoring,
+        makeBookmark: @escaping @Sendable (URL) throws -> Data = ScanService.securityScopedBookmark,
+        openBookmark: @escaping @Sendable (Data) throws -> URL = ScanService.resolveSecurityScoped
+    ) {
         self.coordinator = coordinator
         self.store = store
+        self.makeBookmark = makeBookmark
+        self.openBookmark = openBookmark
+    }
+
+    public nonisolated static func securityScopedBookmark(_ url: URL) throws -> Data {
+        try url.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+    }
+
+    public nonisolated static func resolveSecurityScoped(_ data: Data) throws -> URL {
+        // ponytail: stale bookmarks aren't refreshed in place — the user re-adds the folder. Add a
+        // refresh-and-resave path if staleness turns out to be common.
+        var stale = false
+        return try URL(resolvingBookmarkData: data, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &stale)
+    }
+
+    /// Re-resolve persisted source bookmarks at launch and hold access. Bookmarks that no longer
+    /// resolve (folder moved/deleted, access revoked) are skipped — the user re-adds them.
+    public func loadSources() async throws {
+        var live: [Source] = []
+        var held: [URL] = []
+        for bookmark in try await store.sources() {
+            guard let url = try? openBookmark(bookmark.bookmarkData) else { continue }
+            _ = url.startAccessingSecurityScopedResource()
+            held.append(url)
+            live.append(Source(id: bookmark.id, url: url, displayPath: bookmark.displayPath))
+        }
+        sourceScoped = held
+        sources = live
+    }
+
+    /// Persist newly chosen folders as security-scoped bookmarks and start holding access. Folders
+    /// already remembered (same path) are skipped. Returns the sources actually added.
+    @discardableResult
+    public func addSources(_ urls: [URL]) async throws -> [Source] {
+        var added: [Source] = []
+        for url in urls {
+            let path = url.path
+            if sources.contains(where: { $0.url.path == path }) { continue }
+            // The folder is accessible right now via the picker's transient grant; capture a durable
+            // bookmark from inside that grant.
+            let accessing = url.startAccessingSecurityScopedResource()
+            let data = try makeBookmark(url)
+            if accessing { url.stopAccessingSecurityScopedResource() }
+            let id = try await store.addSource(SourceBookmark(id: 0, bookmarkData: data, displayPath: path))
+            guard let opened = try? openBookmark(data) else { continue }
+            _ = opened.startAccessingSecurityScopedResource()
+            sourceScoped.append(opened)
+            let source = Source(id: id, url: opened, displayPath: path)
+            sources.append(source)
+            added.append(source)
+        }
+        return added
+    }
+
+    /// Forget a source folder and release its access.
+    public func removeSource(id: Int64) async throws {
+        if let idx = sources.firstIndex(where: { $0.id == id }) {
+            let url = sources.remove(at: idx).url
+            url.stopAccessingSecurityScopedResource()
+            sourceScoped.removeAll { $0 == url }
+        }
+        try await store.removeSource(id: id)
     }
 
     /// Runs a scan to completion, persisting as it goes, and returns the owning sessionID.
