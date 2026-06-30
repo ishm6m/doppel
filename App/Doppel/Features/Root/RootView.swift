@@ -172,10 +172,13 @@ struct RootView: View {
                 Button(role: .cancel) { scanTask?.cancel() } label: {
                     Label("Cancel", systemImage: "stop.circle")
                 }
+                .keyboardShortcut(.cancelAction) // ⎋ cancels (ACCESSIBILITY.md §2)
             } else {
-                Button { showImporter = true } label: {
+                // ⌘R scans the remembered folders if any, else opens the picker (ACCESSIBILITY.md §2).
+                Button { scanService.sources.isEmpty ? (showImporter = true) : scanSources() } label: {
                     Label("Scan", systemImage: "magnifyingglass")
                 }
+                .keyboardShortcut("r", modifiers: .command)
             }
         }
     }
