@@ -17,7 +17,7 @@ public protocol IndexStoring: Sendable {
     func restore(ids: [Int64]) async throws
 
     // Groups
-    func saveGroup(_ group: DuplicateGroup, members: [Int64], edges: [MatchEdge]) async throws -> Int64
+    func saveGroup(_ group: DuplicateGroup, members: [Int64], edges: [MatchEdge], sessionID: Int64) async throws -> Int64
     func groups(sessionID: Int64) async throws -> [DuplicateGroup]
     func setKeeper(groupID: Int64, fileID: Int64) async throws
     func ignoreGroup(_ groupID: Int64) async throws
