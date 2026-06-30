@@ -116,10 +116,11 @@ struct RootView: View {
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         if !isScanning, scanService.canUndoTrash {
             ToolbarItem(placement: .secondaryAction) {
+                // ⌘Z lives on the Edit ▸ Undo Delete menu command (DoppelApp); this is the visible
+                // toolbar affordance, no shortcut, to avoid a double ⌘Z binding.
                 Button { undoTrash() } label: {
                     Label("Undo Delete", systemImage: "arrow.uturn.backward")
                 }
-                .keyboardShortcut("z", modifiers: .command)
             }
         }
         ToolbarItem(placement: .primaryAction) {
