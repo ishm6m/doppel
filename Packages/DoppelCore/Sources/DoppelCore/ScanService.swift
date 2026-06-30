@@ -47,6 +47,10 @@ public final class ScanService {
 
     private var lastTrash: TrashUndo?
 
+    /// Member-pairs the user marked "not duplicates" (F7/F14), loaded at scan start. A group whose
+    /// every internal pair is ignored is dropped before it surfaces, so ignored groups don't recur.
+    private var ignoredPairs: Set<Pair> = []
+
     /// Whether the last trash can still be undone (cleared by a new scan or a successful undo).
     public var canUndoTrash: Bool {
         lastTrash != nil
@@ -163,6 +167,7 @@ public final class ScanService {
         total = nil
         summary = nil
         lastTrash = nil
+        ignoredPairs = await (try? store.ignoredPairs()) ?? []
 
         var final = ScanSummary()
         var state: ScanState = .finished
@@ -176,17 +181,7 @@ public final class ScanService {
                 self.processed = processed
                 if let total { self.total = total }
             case let .groupFound(group, members):
-                // ponytail: persist the group's members + the group. We do NOT persist a full file
-                // inventory — the engine only emits grouped/skipped files, which is all the results
-                // UI needs. Add whole-corpus persistence when a screen actually needs every file.
-                try await store.upsertFiles(members)
-                _ = try await store.saveGroup(group, members: members.map(\.id), edges: [], sessionID: sessionID)
-                // ponytail: edges:[] — groupFound carries no MatchEdges; the compare view (F8) doesn't
-                // exist yet. Thread real edges through when it does.
-                groups.append(group)
-                for member in members {
-                    membersByID[member.id] = member
-                }
+                try await persistFoundGroup(group, members: members, sessionID: sessionID)
             case .fileSkipped:
                 break
             case let .finished(summary):
@@ -209,6 +204,23 @@ public final class ScanService {
             state: state
         ))
         return sessionID
+    }
+
+    /// Persists and surfaces one found group, unless the user already marked this exact set "not
+    /// duplicates" (F7/F14), in which case it's dropped before surfacing so it doesn't recur.
+    private func persistFoundGroup(_ group: DuplicateGroup, members: [FileRecord], sessionID: Int64) async throws {
+        if Self.isFullyIgnored(group, by: ignoredPairs) { return }
+        // ponytail: persist the group's members + the group. We do NOT persist a full file inventory —
+        // the engine only emits grouped/skipped files, which is all the results UI needs.
+        try await store.upsertFiles(members)
+        // ponytail: edges:[] — groupFound carries no MatchEdges; the compare view (F8) reads text live
+        // rather than stored edges. Surface with the store-assigned id (the engine emits id 0) so the
+        // list has stable identities and "Ignore group" can target this group.
+        let savedID = try await store.saveGroup(group, members: members.map(\.id), edges: [], sessionID: sessionID)
+        groups.append(group.withID(savedID))
+        for member in members {
+            membersByID[member.id] = member
+        }
     }
 
     /// On-disk URL for a member file, rebuilt from its source root + relative path.
@@ -295,5 +307,47 @@ public final class ScanService {
         groups = undo.groups
         membersByID = undo.members
         return restored
+    }
+
+    /// Marks a group "not duplicates" (F7/F14): persists every member pair as ignored and removes the
+    /// group from the live results. On a later scan, a group whose every internal pair is ignored is
+    /// dropped before it surfaces, so it won't recur. ponytail: keyed by `FileRecord.id`, which is
+    /// stable only while enumeration order is — a content-hash key is the robust cross-rescan upgrade.
+    public func ignore(_ group: DuplicateGroup) async throws {
+        for pair in Self.memberPairs(group.memberFileIDs) {
+            try await store.ignorePair(pair.a, pair.b)
+            ignoredPairs.insert(pair)
+        }
+        if group.id != 0 { try await store.ignoreGroup(group.id) }
+        groups.removeAll { $0.id == group.id }
+    }
+
+    /// Every unordered pair of member ids (a group of N has N·(N-1)/2 pairs).
+    static func memberPairs(_ ids: [Int64]) -> [Pair] {
+        var pairs: [Pair] = []
+        for i in ids.indices {
+            for j in ids.index(after: i) ..< ids.endIndex {
+                pairs.append(Pair(ids[i], ids[j]))
+            }
+        }
+        return pairs
+    }
+
+    /// A group counts as ignored only when *every* internal pair is ignored — a new member joining a
+    /// previously-ignored set makes it a fresh group the user hasn't judged, so it resurfaces.
+    static func isFullyIgnored(_ group: DuplicateGroup, by ignored: Set<Pair>) -> Bool {
+        let pairs = memberPairs(group.memberFileIDs)
+        return !pairs.isEmpty && pairs.allSatisfy(ignored.contains)
+    }
+}
+
+private extension DuplicateGroup {
+    /// Copy carrying a new id (the model's id is `let`); used to stamp the store-assigned id onto the
+    /// engine's id-0 group when surfacing it.
+    func withID(_ id: Int64) -> DuplicateGroup {
+        DuplicateGroup(
+            id: id, matchType: matchType, confidence: confidence, explanation: explanation,
+            keeperFileID: keeperFileID, memberFileIDs: memberFileIDs, ignored: ignored, createdAt: createdAt
+        )
     }
 }
