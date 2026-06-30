@@ -20,8 +20,8 @@
 - [ ] **T1.3** Implement incremental signature lookup (skip-unchanged). DoD: unit test proves unchanged files skipped.
 
 ## Milestone 2 — Engine: Stage 0 & 1
-- [ ] **T2.1** `Enumerator` (Stage 0): walk roots, apply scope + ignore + hidden rules, compute signatures, size-bucket. DoD: enumerates a fixture tree correctly.
-- [ ] **T2.2** Streamed SHA-256 hasher (Stage 1) + exact grouping (union-find). DoD: F3 acceptance + memory-bounded test.
+- [x] **T2.1** `Enumerator` (Stage 0): walk roots, apply scope + ignore + hidden rules, compute signatures, size-bucket. DoD met: `FileEnumerator(scopes:).enumerate(roots:)` drives the cascade; covered by scope-filter, unreadable-skip, and zero-byte fixture tests (DetectionEngineTests/ScanCoordinatorTests).
+- [x] **T2.2** Streamed SHA-256 hasher (Stage 1) + exact grouping (union-find). DoD met: `testStreamedHashMatchesKnownValue` + `testIdenticalFilesShareHash` (hash correctness), `testHashingIsMemoryBounded` (bounded memory), `testIdenticalFilesProduceOneExactEdge` + union-find clustering (F3 exact grouping).
 - [x] **T2.3** `ScanCoordinator` actor emitting `ScanEvent` `AsyncStream`, cancellation, incremental persistence. DoD: cancel-at-50% consistency test passes.
 
 ## Milestone 3 — Engine: Stage 2 (the headline)
