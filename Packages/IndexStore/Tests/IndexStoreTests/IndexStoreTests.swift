@@ -83,7 +83,8 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
     XCTAssertEqual(session?.scopes, [.document, .image])
     XCTAssertEqual(session?.filesDiscovered, 5)
 
-    // Group save + members + keeper + ignore (files 11 & 21 exist under src, satisfying FKs)
+    // Group save + members + keeper + ignore (files 11 & 21 exist under src, satisfying FKs).
+    // Groups are tagged with the owning session (ssid); a different session must not see them.
     let gid = try await store.saveGroup(
         DuplicateGroup(
             id: 0,
@@ -94,18 +95,20 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
             memberFileIDs: [11, 21]
         ),
         members: [11, 21],
-        edges: [MatchEdge(groupID: 0, fileA: 11, fileB: 21, matchType: .exact, score: 1.0, reasonSummary: "sha256")]
+        edges: [MatchEdge(groupID: 0, fileA: 11, fileB: 21, matchType: .exact, score: 1.0, reasonSummary: "sha256")],
+        sessionID: ssid
     )
-    let savedGroup = try await store.groups(sessionID: 0).first { $0.id == gid }
+    let savedGroup = try await store.groups(sessionID: ssid).first { $0.id == gid }
     XCTAssertEqual(savedGroup?.memberFileIDs, [11, 21])
+    let otherSession = try await store.createSession(ScanSession(id: 0, rootBookmarkIDs: [], scopes: [.document]))
+    let isolated = try await store.groups(sessionID: otherSession)
+    XCTAssertTrue(isolated.isEmpty, "groups are scoped to their owning session")
     try await store.setKeeper(groupID: gid, fileID: 21)
-    let keptGroup = try await store.groups(sessionID: 0).first { $0.id == gid }
+    let keptGroup = try await store.groups(sessionID: ssid).first { $0.id == gid }
     XCTAssertEqual(keptGroup?.keeperFileID, 21)
     try await store.ignoreGroup(gid)
-    let ignoredGroup = try await store.groups(sessionID: 0).first { $0.id == gid }
+    let ignoredGroup = try await store.groups(sessionID: ssid).first { $0.id == gid }
     XCTAssertEqual(ignoredGroup?.ignored, true)
-    let sessions = try await store.sessions()
-    XCTAssertTrue(sessions.allSatisfy { $0.id != 0 }) // group-parking sentinel stays hidden
 
     // Ignore pairs (normalized so (a,b) == (b,a))
     try await store.ignorePair(21, 11)
