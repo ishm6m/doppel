@@ -312,6 +312,12 @@ public actor GRDBIndexStore: IndexStoring {
         }
     }
 
+    public func clearIgnoredPairs() async throws {
+        try await dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM ignore_pair")
+        }
+    }
+
     /// Embeddings
     public func saveEmbedding(_ embedding: Embedding) async throws -> Int64 {
         let blob = packFloats(embedding.vector)

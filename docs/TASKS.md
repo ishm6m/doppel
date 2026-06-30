@@ -44,7 +44,7 @@
 
 ## Milestone 6 — Onboarding, Settings, History
 - [x] **T6.1** Onboarding flow (F10). DoD met: 3-page native sheet (privacy guarantee → content-aware → choose folders), skippable, shown once via `@AppStorage("onboardingComplete")`, leads into F1 folder selection; native controls + accessibility labels.
-- [ ] **T6.2** Settings scene: General/Detection/Model/Ignore/About (F11). DoD: toggles affect engine.
+- [x] **T6.2** Settings scene: General/Detection/Model/Ignore/About (F11). DoD met: native 5-tab `Settings` scene; near-dup sensitivity + OCR + scopes persist to UserDefaults and flow into the next scan's `ScanRequest`/`DetectionConfig` via `DetectionSettings` (`testClearIgnoredListLetsGroupRecur` covers the ignore-list reset path). Model tab shows the stub provider (Core ML pending pin); Ignore List reviews/​resets remembered pairs; About shows name/version + privacy line. (Default-keeper rule + deep-scan default deferred — they need engine/T7.3 consumers, not shipped as dead toggles.)
 - [ ] **T6.3** Scan history sidebar + reopen (F12). DoD: F12 acceptance.
 
 ## Milestone 7 — Semantic tier (opt-in)

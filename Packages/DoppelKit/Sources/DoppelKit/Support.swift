@@ -4,6 +4,11 @@ public enum AppInfo {
     /// Single source of truth for the product name (placeholder; rename here only).
     public static let productName = "Doppel"
     public static let bundleIdentifier = "com.doppel.app"
+    /// Marketing version from the app bundle (CFBundleShortVersionString); "—" outside an app bundle
+    /// (e.g. unit tests / SwiftPM).
+    public static var version: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+    }
 }
 
 public enum Similarity {
