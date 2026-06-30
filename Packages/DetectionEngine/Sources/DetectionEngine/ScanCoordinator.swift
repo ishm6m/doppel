@@ -7,13 +7,18 @@ import Foundation
 public actor ScanCoordinator: ScanCoordinating {
     /// Test seam: lets a test inject a hash closure (e.g. to trigger cancellation mid-run). Defaults to real.
     private let hash: (@Sendable (URL) throws -> Data)?
+    /// Stage 3 embedding model (F6). Swappable (T7.4) — defaults to the deterministic stub so the
+    /// default no-model build works; the app injects the real provider once one is pinned.
+    private let embedding: EmbeddingProvider
 
-    public init() {
+    public init(embedding: EmbeddingProvider = StubEmbeddingProvider()) {
         hash = nil
+        self.embedding = embedding
     }
 
-    init(hash: @escaping @Sendable (URL) throws -> Data) {
+    init(hash: @escaping @Sendable (URL) throws -> Data, embedding: EmbeddingProvider = StubEmbeddingProvider()) {
         self.hash = hash
+        self.embedding = embedding
     }
 
     public nonisolated func scan(_ request: ScanRequest) -> AsyncThrowingStream<ScanEvent, Error> {
@@ -76,6 +81,12 @@ public actor ScanCoordinator: ScanCoordinating {
             records[rec.id] = rec
         } // exact-wins keeps sha256
 
+        // Stage 3 (opt-in "Deep scan", F6): only adds `.semantic` edges; the cancellation checks
+        // bracketing this section suffice for the fast path. Off unless the user asked (battery).
+        if request.config.deepScan {
+            edges += await semanticEdges(inputs: inputs, candidates: candidates, priorEdges: edges, config: request.config, c)
+        }
+
         // Final clustering: one file → one authoritative group. Emit each, then finish.
         if Task.isCancelled { c.yield(.cancelled(partial: summary)); c.finish(); return }
         c.yield(.progress(phase: .clustering, processed: totalToHash, total: totalToHash))
@@ -109,6 +120,34 @@ public actor ScanCoordinator: ScanCoordinating {
         let representatives = Set(uf.groups().compactMap { comp in comp.map { ids[$0] }.min() })
         let inExact = Set(ids)
         return candidates.filter { !inExact.contains($0.record.id) || representatives.contains($0.record.id) }
+    }
+
+    /// Stage 3 semantic edges (opt-in, F6). Embeds ONLY survivors of the cheaper stages — one
+    /// representative per exact/near group plus unmatched docs (golden rule 5: never embed what
+    /// exact/near already resolved) — reusing the text already extracted for Stage 2, then cosine
+    /// within buckets. A whole-stage embed failure is swallowed so the cheaper-stage groups still
+    /// stand: the scan never fails because the optional ML tier did.
+    private func semanticEdges(
+        inputs: [NearTextStage.Input],
+        candidates: [EnumeratedFile],
+        priorEdges: [StageEdge],
+        config: DetectionConfig,
+        _ c: AsyncThrowingStream<ScanEvent, Error>.Continuation
+    ) async -> [StageEdge] {
+        let survivorIDs = Set(survivors(of: candidates, exactEdges: priorEdges).map(\.record.id))
+        let semInputs = inputs
+            .filter { survivorIDs.contains($0.record.id) }
+            .map { SemanticStage.Input(record: $0.record, text: $0.text) }
+        guard semInputs.count > 1 else { return [] }
+        // ponytail: coarse 0→done progress — SemanticStage embeds internally with no per-item callback.
+        // Thread a progress closure through it when a real (slow) provider lands and per-file feedback matters.
+        c.yield(.progress(phase: .embedding, processed: 0, total: semInputs.count))
+        defer { c.yield(.progress(phase: .embedding, processed: semInputs.count, total: semInputs.count)) }
+        do {
+            return try await SemanticStage(provider: embedding, config: config).group(semInputs).edges
+        } catch {
+            return []
+        }
     }
 
     private func extractText(

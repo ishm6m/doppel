@@ -15,6 +15,9 @@ struct RootView: View {
     /// File ids the user has checked for deletion. Never pre-populated (golden rule 3).
     @State private var selection: Set<Int64> = []
     @State private var showTrashConfirm = false
+    /// Gate for the opt-in "Deep scan" (F6/T7.3): a confirmation carrying the battery note, so the
+    /// expensive semantic tier only ever runs on a deliberate, informed action.
+    @State private var showDeepScanConfirm = false
     /// The keeper/other pair the user asked to compare (F8), shown in a sheet. Nil when closed.
     @State private var comparing: ComparePair?
     /// First-launch onboarding gate (F10): shown once, then persisted so it never reappears.
@@ -75,6 +78,14 @@ struct RootView: View {
                         if chooseFolders { showImporter = true }
                     }
                     .interactiveDismissDisabled()
+                }
+                .confirmationDialog("Run a deep scan?", isPresented: $showDeepScanConfirm, titleVisibility: .visible) {
+                    Button("Run Deep Scan") { runScan(deepScan: true) }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Deep scan reads the meaning of your documents with an on-device model to catch "
+                        + "same-meaning rewrites the fast scan misses. It's slower and uses more energy — "
+                        + "best run while plugged in. Nothing leaves your Mac.")
                 }
         } detail: {
             InspectorPlaceholder()
@@ -158,6 +169,15 @@ struct RootView: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        if !isScanning, !scanService.sources.isEmpty {
+            ToolbarItem(placement: .secondaryAction) {
+                // Opt-in semantic tier (F6/T7.3). Confirms first (battery note) so it never runs by surprise.
+                Button { showDeepScanConfirm = true } label: {
+                    Label("Deep Scan", systemImage: "sparkle.magnifyingglass")
+                }
+                .help("Find same-meaning documents using an on-device model. Slower; best while plugged in.")
+            }
+        }
         if !isScanning, scanService.canUndoTrash {
             ToolbarItem(placement: .secondaryAction) {
                 // ⌘Z lives on the Edit ▸ Undo Delete menu command (DoppelApp); this is the visible
@@ -208,8 +228,14 @@ struct RootView: View {
         }
     }
 
-    /// Scan every remembered source, tying the session to those sources' bookmark ids.
+    /// Zero-arg entry for ⌘R and the Scan button: a normal (fast) cascade, no embedding.
     private func scanSources() {
+        runScan(deepScan: false)
+    }
+
+    /// Scan every remembered source, tying the session to those sources' bookmark ids. `deepScan` turns
+    /// on the opt-in semantic tier (F6) for this run only — it's an explicit action, never a persisted default.
+    private func runScan(deepScan: Bool) {
         let roots = scanService.sources.map(\.url)
         let bookmarkIDs = scanService.sources.map(\.id)
         guard !roots.isEmpty else { return }
@@ -217,7 +243,9 @@ struct RootView: View {
         scanTask = Task {
             do {
                 // Scopes + thresholds come from Settings (F11), so a settings change takes effect here.
-                let request = ScanRequest(roots: roots, scopes: DetectionSettings.scopes, config: DetectionSettings.config)
+                var config = DetectionSettings.config
+                config.deepScan = deepScan
+                let request = ScanRequest(roots: roots, scopes: DetectionSettings.scopes, config: config)
                 let id = try await scanService.startScan(request, rootBookmarkIDs: bookmarkIDs)
                 // The finished scan becomes the selected history entry, so its results stay on screen.
                 sidebarSelection = .session(id)
