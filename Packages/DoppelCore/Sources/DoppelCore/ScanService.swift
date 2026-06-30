@@ -240,11 +240,18 @@ public final class ScanService {
         var undoFiles: [(record: FileRecord, trashURL: URL)] = []
         for id in ids {
             guard let file = membersByID[id], let url = absoluteURL(for: file) else { continue }
-            // Capture where it lands in the Trash so undoLastTrash can move it straight back.
-            var resulting: NSURL?
-            try fm.trashItem(at: url, resultingItemURL: &resulting)
-            trashed.append(id)
-            if let dest = resulting as URL? { undoFiles.append((file, dest)) }
+            // ponytail: trash each file independently so one failure (already gone, permissions) can't
+            // abort the batch or strand the index — only files actually trashed leave the results and
+            // get markDeleted (index stays consistent, F9). A failed file stays visibly in its group.
+            do {
+                // Capture where it lands in the Trash so undoLastTrash can move it straight back.
+                var resulting: NSURL?
+                try fm.trashItem(at: url, resultingItemURL: &resulting)
+                trashed.append(id)
+                if let dest = resulting as URL? { undoFiles.append((file, dest)) }
+            } catch {
+                continue
+            }
         }
         guard !trashed.isEmpty else { return [] }
         try await store.markDeleted(ids: trashed)
