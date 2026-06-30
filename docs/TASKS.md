@@ -34,7 +34,7 @@
 - [x] **T4.1** `NavigationSplitView` shell: sidebar (sources/scans), content (results), inspector. DoD met: three-column shell, empty states render. (Sidebar selection not yet wired to filter content — sources/results shown contextually; deferred.)
 - [x] **T4.2** F1 folder selection (panel + bookmarks). DoD met: fileImporter picks folders, security-scoped bookmarks persisted + re-resolved across launches. (Drag-drop deferred.)
 - [x] **T4.3** Scan run + live progress header (F2 UI). DoD met: determinate phase/processed/total bar, live groups + reclaimable counters, Cancel works. (ETA deferred — needs a rate model.)
-- [ ] **T4.4** Group list with badges, confidence, explanation, keeper, reclaimable size (F7). DoD: invariant test (no empty explanation).
+- [x] **T4.4** Group list with badges, confidence, explanation, keeper, reclaimable size (F7). DoD met: GroupCard shows match-type badge, confidence, explanation, suggested-keeper star, file count + per-group reclaimable size; engine invariant test asserts every emitted group (exact + near) has a non-empty explanation and positive confidence. ("Ignore group" is T5.4.)
 
 ## Milestone 5 — Compare & safe delete (trust core)
 - [ ] **T5.1** Text diff engine (word/line) + compare view (F8). DoD: contract-date demo highlights the date.

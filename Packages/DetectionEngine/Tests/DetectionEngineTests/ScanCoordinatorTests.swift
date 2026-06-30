@@ -153,6 +153,32 @@ final class ScanCoordinatorTests: XCTestCase {
         XCTAssertEqual(summary.groupsFound, 1)
     }
 
+    /// Golden rule 4 / F7 DoD invariant: every group the engine emits carries a non-empty,
+    /// human-readable explanation and a positive confidence — exercised over a corpus that yields
+    /// both an exact and a near-text group, so both real reason generators are covered.
+    func testEveryEmittedGroupHasExplanationAndConfidence() async throws {
+        let dir = try makeTree(); defer { try? FileManager.default.removeItem(at: dir) }
+        try write("identical body here", "exact-a.txt", in: dir)
+        try write("identical body here", "exact-b.txt", in: dir) // exact pair
+        var words = (0 ..< 200).map { "w\($0)" }
+        try write(words.joined(separator: " "), "near-a.txt", in: dir)
+        words[100] = "changed"
+        try write(words.joined(separator: " "), "near-b.txt", in: dir) // near-text pair
+
+        let events = try await drain(ScanCoordinator().scan(ScanRequest(roots: [dir], scopes: [.document])))
+        let groups = events.compactMap { e -> DuplicateGroup? in
+            if case let .groupFound(g, _) = e { return g }; return nil
+        }
+        XCTAssertEqual(groups.count, 2, "expected one exact + one near-text group")
+        for group in groups {
+            XCTAssertFalse(
+                group.explanation.trimmingCharacters(in: .whitespaces).isEmpty,
+                "\(group.matchType) group must explain itself (golden rule 4)"
+            )
+            XCTAssertGreaterThan(group.confidence, 0)
+        }
+    }
+
     // Incremental: files whose signature is already known are never re-hashed.
     func testIncrementalRunSkipsUnchangedFiles() async throws {
         let dir = try makeTree(); defer { try? FileManager.default.removeItem(at: dir) }
