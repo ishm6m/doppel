@@ -322,6 +322,17 @@ public final class ScanService {
         groups.removeAll { $0.id == group.id }
     }
 
+    /// How many not-duplicate pairs are remembered (Settings ▸ Ignore List).
+    public func ignoredPairCount() async -> Int {
+        await ((try? store.ignoredPairs()) ?? []).count
+    }
+
+    /// Forget the entire not-duplicates list; previously-ignored groups can resurface next scan.
+    public func clearIgnoredList() async throws {
+        try await store.clearIgnoredPairs()
+        ignoredPairs = []
+    }
+
     /// Every unordered pair of member ids (a group of N has N·(N-1)/2 pairs).
     static func memberPairs(_ ids: [Int64]) -> [Pair] {
         var pairs: [Pair] = []

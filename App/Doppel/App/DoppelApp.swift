@@ -5,6 +5,10 @@ import SwiftUI
 struct DoppelApp: App {
     @State private var environment = AppEnvironment.live()
 
+    init() {
+        DetectionSettings.registerDefaults()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -30,7 +34,7 @@ struct DoppelApp: App {
         }
 
         Settings {
-            SettingsPlaceholderView() // Built in Milestone 6 (T6.2)
+            SettingsView()
                 .environment(environment)
         }
     }
