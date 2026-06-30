@@ -1,4 +1,5 @@
 import DetectionEngine
+import DoppelCore
 import DoppelKit
 import Foundation
 import IndexStore
@@ -12,6 +13,7 @@ final class AppEnvironment {
     let store: any IndexStoring
     let coordinator: any ScanCoordinating
     let embedding: any EmbeddingProvider
+    let scanService: ScanService
     let log = Logger(subsystem: AppInfo.bundleIdentifier, category: "app")
 
     init(
@@ -22,6 +24,7 @@ final class AppEnvironment {
         self.store = store
         self.coordinator = coordinator
         self.embedding = embedding
+        scanService = ScanService(coordinator: coordinator, store: store)
     }
 
     /// Live wiring. The GRDB store path lives in Application Support (DATA_MODEL.md §1).

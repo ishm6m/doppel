@@ -15,7 +15,7 @@ jobs:
       - name: Build & test packages
         run: |
           set -e
-          for pkg in DoppelKit IndexStore DetectionEngine; do
+          for pkg in DoppelKit IndexStore DetectionEngine DoppelCore; do
             echo "::group::$pkg"
             swift build --package-path "Packages/$pkg"
             swift test  --package-path "Packages/$pkg"
