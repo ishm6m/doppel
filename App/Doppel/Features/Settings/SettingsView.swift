@@ -92,24 +92,24 @@ private struct ModelSettings: View {
 
 private struct IgnoreListSettings: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var count = 0
+    @State private var pairCount = 0
     @State private var confirmReset = false
 
     var body: some View {
         Form {
-            LabeledContent("Remembered \"not duplicates\"", value: "\(count) pair\(count == 1 ? "" : "s")")
+            LabeledContent("Remembered \"not duplicates\"", value: "\(pairCount) pair\(pairCount == 1 ? "" : "s")")
             Button("Reset Ignore List", role: .destructive) { confirmReset = true }
-                .disabled(count == 0)
+                .disabled(pairCount == 0)
             Text("Groups you marked \"not duplicates\" won't reappear. Resetting lets them surface again.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped).padding(.vertical, 8).frame(height: 220)
-        .task { count = await env.scanService.ignoredPairCount() }
+        .task { pairCount = await env.scanService.ignoredPairCount() }
         .confirmationDialog("Reset the ignore list?", isPresented: $confirmReset) {
             Button("Reset", role: .destructive) {
                 Task {
                     try? await env.scanService.clearIgnoredList()
-                    count = await env.scanService.ignoredPairCount()
+                    pairCount = await env.scanService.ignoredPairCount()
                 }
             }
         }
