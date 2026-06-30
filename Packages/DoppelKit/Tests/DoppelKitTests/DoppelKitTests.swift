@@ -50,3 +50,26 @@ final class DoppelKitTests: XCTestCase {
         XCTAssertTrue((0 ... 1).contains(g.confidence))
     }
 }
+
+extension DoppelKitTests {
+    /// F8 diff: a contract pair identical except the date highlights ONLY the date on each side,
+    /// everything else stays unchanged. This is the "trust builder" demo as a unit test.
+    func testTextDiffHighlightsOnlyTheChangedWord() {
+        let a = "this agreement dated 2024 between alice and bob"
+        let b = "this agreement dated 2025 between alice and bob"
+        let diff = TextDiff.compute(a, b)
+        XCTAssertFalse(diff.isIdentical)
+        XCTAssertEqual(diff.left.filter(\.changed).map { String($0.text) }, ["2024"])
+        XCTAssertEqual(diff.right.filter(\.changed).map { String($0.text) }, ["2025"])
+        // Unchanged words are shared and not flagged on either side.
+        XCTAssertEqual(
+            diff.left.filter { !$0.changed }.map { String($0.text) },
+            ["this", "agreement", "dated", "between", "alice", "and", "bob"]
+        )
+    }
+
+    func testTextDiffIdenticalTextHasNoChanges() {
+        let diff = TextDiff.compute("same body here", "same body here")
+        XCTAssertTrue(diff.isIdentical)
+    }
+}

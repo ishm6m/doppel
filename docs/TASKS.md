@@ -37,7 +37,7 @@
 - [x] **T4.4** Group list with badges, confidence, explanation, keeper, reclaimable size (F7). DoD met: GroupCard shows match-type badge, confidence, explanation, suggested-keeper star, file count + per-group reclaimable size; engine invariant test asserts every emitted group (exact + near) has a non-empty explanation and positive confidence. ("Ignore group" is T5.4.)
 
 ## Milestone 5 — Compare & safe delete (trust core)
-- [ ] **T5.1** Text diff engine (word/line) + compare view (F8). DoD: contract-date demo highlights the date.
+- [x] **T5.1** Text diff engine (word) + compare view (F8). DoD met: `TextDiff` (stdlib CollectionDifference) flags changed words per side; `CompareView` renders two panes with changed words highlighted; "Compare" affordance on each non-keeper row diffs it against the keeper. Contract-date demo proven by `testTextDiffHighlightsOnlyTheChangedWord`. (Diffs the *normalized* text the engine matched on; original-formatting compare deferred.)
 - [ ] **T5.2** Safe deletion: Trash-only + confirmation sheet + multi-select + select-all-but-keeper (F9). DoD: files go to Trash; lint/test forbids `removeItem` on user files.
 - [ ] **T5.3** Undo (⌘Z / Edit menu) restoring from Trash. DoD: F9 acceptance.
 - [ ] **T5.4** Ignore group / not-duplicates persistence (F7/F14). DoD: ignored group doesn't recur.

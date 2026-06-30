@@ -218,6 +218,16 @@ public final class ScanService {
         return rootURLs[idx].appendingPathComponent(file.relativePath)
     }
 
+    /// Word-level diff of two member files for the compare view (F8 — "why did these match?"). Reads
+    /// each file's normalized text off disk (we hold security-scoped access) and diffs them. Returns nil
+    /// if either has no comparable text layer (scanned PDF, unsupported type) — the UI says so.
+    public func compareTexts(_ a: FileRecord, _ b: FileRecord) async -> TextDiff? {
+        guard let ua = absoluteURL(for: a), let ub = absoluteURL(for: b),
+              let ta = await extractNormalizedText(at: ua), let tb = await extractNormalizedText(at: ub)
+        else { return nil }
+        return TextDiff.compute(ta, tb)
+    }
+
     /// Moves the given member files to the Trash — never `removeItem`/`unlink`, so every deletion is
     /// recoverable (golden rule 2). We trash exactly the ids asked; the human chose them. Returns the
     /// ids actually trashed. After trashing, members drop from the live results and groups that fall
