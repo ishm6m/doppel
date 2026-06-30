@@ -14,7 +14,16 @@ struct DoppelApp: App {
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .commands {
-            // Native menu commands are wired in Milestone 5 (undo) / 6 (scan ⌘R).
+            // Edit ▸ Undo Delete (⌘Z) restores the last trash from the Trash (F9). Fires
+            // unconditionally — undoLastTrash() is a no-op when there's nothing to undo, which keeps
+            // the command off the @Observable-in-commands tracking problem. (ponytail: a disabled-state
+            // binding would need the env observed here; not worth it for a safe no-op.)
+            CommandGroup(replacing: .undoRedo) {
+                Button("Undo Delete") {
+                    Task { try? await environment.scanService.undoLastTrash() }
+                }
+                .keyboardShortcut("z", modifiers: .command)
+            }
             CommandGroup(replacing: .help) {
                 Link("\(AppInfo.productName) Help", destination: URL(string: "https://example.com")!)
             }
