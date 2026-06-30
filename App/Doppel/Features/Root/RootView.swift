@@ -56,9 +56,9 @@ struct RootView: View {
 
     @ViewBuilder private var content: some View {
         if isScanning {
-            ScanProgressView(phase: scanService.phase, groups: scanService.groups)
+            ScanProgressView(phase: scanService.phase, groups: scanService.groups, members: scanService.membersByID)
         } else if !scanService.groups.isEmpty {
-            ResultsList(groups: scanService.groups)
+            ResultsList(groups: scanService.groups, members: scanService.membersByID)
         } else if scanService.summary != nil {
             ContentUnavailableView("No duplicates found 🎉", systemImage: "checkmark.seal")
         } else {
@@ -111,6 +111,7 @@ enum SidebarItem: Hashable { case sources, scans }
 private struct ScanProgressView: View {
     let phase: ScanPhase?
     let groups: [DuplicateGroup]
+    let members: [Int64: FileRecord]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -122,27 +123,45 @@ private struct ScanProgressView: View {
                 Text("\(groups.count) groups").foregroundStyle(.secondary)
             }
             .padding(.horizontal)
-            ResultsList(groups: groups)
+            ResultsList(groups: groups, members: members)
         }
         .padding(.top)
     }
 }
 
-/// Flat list of GroupCards (UI_SPEC.md §6).
+/// Flat list of expandable GroupCards (UI_SPEC.md §6).
 private struct ResultsList: View {
     let groups: [DuplicateGroup]
+    let members: [Int64: FileRecord]
 
     var body: some View {
         List(groups) { group in
-            GroupCard(group: group)
+            GroupCard(group: group, members: members)
         }
     }
 }
 
 private struct GroupCard: View {
     let group: DuplicateGroup
+    let members: [Int64: FileRecord]
+    @State private var isExpanded = false
 
     var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            // ponytail: rows resolve from the in-memory member map; a file we somehow didn't retain
+            // is skipped rather than crashing. Member IDs are unique per scan, so order is stable.
+            ForEach(group.memberFileIDs, id: \.self) { id in
+                if let file = members[id] {
+                    MemberRow(file: file, isKeeper: id == group.keeperFileID)
+                }
+            }
+        } label: {
+            header
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text(badgeLabel)
@@ -159,7 +178,6 @@ private struct GroupCard: View {
             // Golden rule 4: every group carries a human-readable reason.
             Text(group.explanation).font(.body)
         }
-        .padding(.vertical, 4)
     }
 
     private var badgeLabel: String {
@@ -177,6 +195,30 @@ private struct GroupCard: View {
         case .nearText: .blue
         case .nearImage: .purple
         case .semantic: .orange
+        }
+    }
+}
+
+/// One file within a group (UI_SPEC.md §6 member row). The suggested keeper is starred; making the
+/// star interactive + selection checkboxes arrive with safe deletion (T5.2).
+private struct MemberRow: View {
+    let file: FileRecord
+    let isKeeper: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: isKeeper ? "star.fill" : "doc")
+                .foregroundStyle(isKeeper ? .yellow : .secondary)
+                .help(isKeeper ? "Suggested keeper" : "")
+            VStack(alignment: .leading, spacing: 1) {
+                Text(file.displayName)
+                Text(file.relativePath)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .truncationMode(.middle).lineLimit(1)
+            }
+            Spacer()
+            Text(file.sizeBytes.formatted(.byteCount(style: .file)))
+                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
         }
     }
 }

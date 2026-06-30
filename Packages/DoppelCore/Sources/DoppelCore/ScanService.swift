@@ -16,6 +16,9 @@ public final class ScanService {
 
     /// Groups found so far in the current scan, in arrival order — UI shows results before completion.
     public private(set) var groups: [DuplicateGroup] = []
+    /// Member files of found groups, keyed by id, so the results UI can render rows (name/path/size)
+    /// without a DB round-trip. Only grouped members — not a full inventory (see persist note below).
+    public private(set) var membersByID: [Int64: FileRecord] = [:]
     /// Latest progress phase, for the scan header. Nil before the first scan.
     public private(set) var phase: ScanPhase?
     /// Authoritative summary, set when the scan terminates.
@@ -34,6 +37,7 @@ public final class ScanService {
             ScanSession(id: 0, rootBookmarkIDs: rootBookmarkIDs, scopes: request.scopes)
         )
         groups = []
+        membersByID = [:]
         phase = nil
         summary = nil
 
@@ -54,6 +58,9 @@ public final class ScanService {
                 // ponytail: edges:[] — groupFound carries no MatchEdges; the compare view (F8) doesn't
                 // exist yet. Thread real edges through when it does.
                 groups.append(group)
+                for member in members {
+                    membersByID[member.id] = member
+                }
             case .fileSkipped:
                 break
             case let .finished(summary):
