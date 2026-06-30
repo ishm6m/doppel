@@ -45,7 +45,7 @@
 ## Milestone 6 — Onboarding, Settings, History
 - [x] **T6.1** Onboarding flow (F10). DoD met: 3-page native sheet (privacy guarantee → content-aware → choose folders), skippable, shown once via `@AppStorage("onboardingComplete")`, leads into F1 folder selection; native controls + accessibility labels.
 - [x] **T6.2** Settings scene: General/Detection/Model/Ignore/About (F11). DoD met: native 5-tab `Settings` scene; near-dup sensitivity + OCR + scopes persist to UserDefaults and flow into the next scan's `ScanRequest`/`DetectionConfig` via `DetectionSettings` (`testClearIgnoredListLetsGroupRecur` covers the ignore-list reset path). Model tab shows the stub provider (Core ML pending pin); Ignore List reviews/​resets remembered pairs; About shows name/version + privacy line. (Default-keeper rule + deep-scan default deferred — they need engine/T7.3 consumers, not shipped as dead toggles.)
-- [ ] **T6.3** Scan history sidebar + reopen (F12). DoD: F12 acceptance.
+- [x] **T6.3** Scan history sidebar + reopen (F12). DoD met: a "Recent Scans" sidebar section lists past sessions (date + groups + reclaimable); selecting one reopens its persisted groups + member records (`testReopenSessionRestoresGroups`); a finished live scan auto-selects as its history entry so results stay on screen. History persists across launches (loaded from the store). ponytail: "read-only if files changed" is approximated — actions degrade gracefully when a file/source is gone rather than hard-disabling.
 
 ## Milestone 7 — Semantic tier (opt-in)
 - [x] **T7.1** `EmbeddingProvider` protocol + deterministic stub. DoD met: stub-driven tests.

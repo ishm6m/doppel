@@ -29,6 +29,9 @@ public final class ScanService {
     /// Authoritative summary, set when the scan terminates.
     public private(set) var summary: ScanSummary?
 
+    /// Past scans, newest first, for the history sidebar (F12). Refreshed on demand + after each scan.
+    public private(set) var sessions: [ScanSession] = []
+
     /// Source roots of the current scan, indexed by `FileRecord.bookmarkID`, for path reconstruction.
     private var rootURLs: [URL] = []
     /// Roots we hold security-scoped access to. Kept open past scan end so the results can be acted on
@@ -203,7 +206,43 @@ public final class ScanService {
             bytesReclaimable: final.bytesReclaimable,
             state: state
         ))
+        await loadSessions()
         return sessionID
+    }
+
+    /// Loads the scan history, newest first (F12).
+    public func loadSessions() async {
+        sessions = await ((try? store.sessions()) ?? []).sorted { $0.startedAt > $1.startedAt }
+    }
+
+    /// Reopens a past scan: loads its groups + member records into the live results state so the same
+    /// results UI renders them. Rebuilds source URLs from the still-remembered sources, so compare/trash
+    /// work when those folders are still added; otherwise actions degrade safely (paths won't resolve).
+    /// ponytail: approximates F12's "read-only if files changed" — it doesn't diff disk, it just fails
+    /// gracefully on missing files. Add an on-disk freshness check if stale reopen becomes confusing.
+    public func openSession(_ id: Int64) async throws {
+        let saved = try await store.groups(sessionID: id)
+        var members: [Int64: FileRecord] = [:]
+        for group in saved {
+            for memberID in group.memberFileIDs where members[memberID] == nil {
+                members[memberID] = try await store.file(id: memberID)
+            }
+        }
+        for url in scopedRoots {
+            url.stopAccessingSecurityScopedResource()
+        }
+        scopedRoots = []
+        if let session = sessions.first(where: { $0.id == id }) {
+            // Same index→source order scanSources used, so FileRecord.bookmarkID still aligns.
+            rootURLs = session.rootBookmarkIDs.map { sid in
+                sources.first { $0.id == sid }?.url ?? URL(fileURLWithPath: "/")
+            }
+        }
+        groups = saved
+        membersByID = members.compactMapValues { $0 }
+        phase = nil
+        summary = nil
+        lastTrash = nil
     }
 
     /// Persists and surfaces one found group, unless the user already marked this exact set "not
