@@ -130,4 +130,30 @@ final class ScanServiceTests: XCTestCase {
         XCTAssertEqual(svc.groups.count, 1, "group restored")
         XCTAssertFalse(svc.canUndoTrash, "undo consumed")
     }
+
+    /// Source folders are persisted on add and re-resolved by a fresh service from the same store,
+    /// so folder access survives relaunch (T4.2). Identity bookmark codecs stand in for the
+    /// security-scoped APIs, which need the app sandbox that `swift test` lacks.
+    func testSourcesPersistAndReloadAcrossServices() async throws {
+        let store = InMemoryIndexStore()
+        let encode: @Sendable (URL) throws -> Data = { Data($0.path.utf8) }
+        let decode: @Sendable (Data) throws -> URL = { URL(fileURLWithPath: String(decoding: $0, as: UTF8.self)) }
+        let svc = ScanService(coordinator: StubCoordinator(events: []), store: store, makeBookmark: encode, openBookmark: decode)
+
+        let added = try await svc.addSources([URL(fileURLWithPath: "/tmp/a"), URL(fileURLWithPath: "/tmp/b")])
+        XCTAssertEqual(added.count, 2)
+        // Re-adding the same path is a no-op (deduped).
+        try await svc.addSources([URL(fileURLWithPath: "/tmp/a")])
+        XCTAssertEqual(svc.sources.map(\.displayPath), ["/tmp/a", "/tmp/b"])
+
+        // A brand-new service over the same store rebuilds the source list from persisted bookmarks.
+        let relaunched = ScanService(coordinator: StubCoordinator(events: []), store: store, makeBookmark: encode, openBookmark: decode)
+        try await relaunched.loadSources()
+        XCTAssertEqual(relaunched.sources.map(\.displayPath), ["/tmp/a", "/tmp/b"])
+
+        try await relaunched.removeSource(id: added[0].id)
+        XCTAssertEqual(relaunched.sources.map(\.displayPath), ["/tmp/b"])
+        let persisted = try await store.sources().map(\.displayPath)
+        XCTAssertEqual(persisted, ["/tmp/b"])
+    }
 }
