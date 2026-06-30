@@ -37,11 +37,13 @@ private struct SkippedSection: View {
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle")
                             .foregroundStyle(.secondary)
+                            .accessibilityHidden(true) // decorative; the reason text conveys it
                         VStack(alignment: .leading, spacing: 1) {
                             Text(item.file.displayName)
                             Text(Self.reason(item.issue))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        .accessibilityElement(children: .combine)
                         Spacer()
                         Button("Reveal in Finder", systemImage: "magnifyingglass") { onReveal(item.file) }
                             .labelStyle(.iconOnly).buttonStyle(.borderless)
@@ -136,6 +138,13 @@ private struct GroupCard: View {
             // Golden rule 4: every group carries a human-readable reason.
             Text(group.explanation).font(.body)
         }
+        // VoiceOver reads the whole group summary as one phrase (ACCESSIBILITY.md §1).
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(badgeLabel), \(Int(group.confidence * 100)) percent confidence, "
+                + "\(group.memberFileIDs.count) files, "
+                + "\(reclaimable.formatted(.byteCount(style: .file))) reclaimable. \(group.explanation)"
+        )
     }
 
     private var badgeLabel: String {
@@ -173,6 +182,9 @@ private struct MemberRow: View {
             Image(systemName: isKeeper ? "star.fill" : "doc")
                 .foregroundStyle(isKeeper ? .yellow : .secondary)
                 .help(isKeeper ? "Suggested keeper" : "")
+                // Keeper status is meaningful; the plain doc icon is decorative.
+                .accessibilityLabel(isKeeper ? "Suggested keeper" : "")
+                .accessibilityHidden(!isKeeper)
             VStack(alignment: .leading, spacing: 1) {
                 Text(file.displayName)
                 Text(file.relativePath)
