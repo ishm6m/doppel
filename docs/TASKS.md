@@ -9,15 +9,15 @@
 ---
 
 ## Milestone 0 — Project skeleton
-- [ ] **T0.1** Create Xcode project `Doppel` (macOS 14, SwiftUI lifecycle, Swift 6 strict concurrency). Add SwiftFormat + SwiftLint config. DoD: builds, lint passes, empty window launches.
-- [ ] **T0.2** Create SPM packages `DoppelKit`, `IndexStore`, `DetectionEngine` with the dependency rules in `ARCHITECTURE.md` §2. DoD: packages compile, App depends on all three, no reverse deps.
-- [ ] **T0.3** Add `AppEnvironment` DI container + `Logger` subsystems. DoD: env injected into root view; logs emit.
-- [ ] **T0.4** Set entitlements: App Sandbox, user-selected read-write, no network. DoD: matches `SECURITY.md`.
+- [x] **T0.1** Create Xcode project `Doppel` (macOS 14, SwiftUI lifecycle, Swift 6 strict concurrency). Add SwiftFormat + SwiftLint config. DoD met: project (xcodegen-generated) builds, lint config + gate in place, app window launches.
+- [x] **T0.2** Create SPM packages `DoppelKit`, `IndexStore`, `DetectionEngine` (+ `DoppelCore`) with the dependency rules in `ARCHITECTURE.md` §2. DoD met: packages compile, App depends on them, DetectionEngine imports no SwiftUI/IndexStore.
+- [x] **T0.3** Add `AppEnvironment` DI container + `Logger` subsystems. DoD met: `AppEnvironment` (manual constructor injection) injected into RootView; `Logger(subsystem: com.doppel.app)`.
+- [x] **T0.4** Set entitlements: App Sandbox, user-selected read-write, no network. DoD met: `Doppel.entitlements` = sandbox + user-selected RW + app-scope bookmarks, no network (enforced by the T8.4 egress guard).
 
 ## Milestone 1 — Persistence
-- [ ] **T1.1** Implement `IndexStore` GRDB stack + `DatabaseMigrator` v1 (all tables in `DATA_MODEL.md` §3). DoD: migration test creates schema; WAL on.
-- [ ] **T1.2** Implement `IndexStoring` async protocol + in-memory test double. DoD: CRUD for files/groups/sessions/sources covered by tests.
-- [ ] **T1.3** Implement incremental signature lookup (skip-unchanged). DoD: unit test proves unchanged files skipped.
+- [x] **T1.1** Implement `IndexStore` GRDB stack + `DatabaseMigrator` v1 (all tables in `DATA_MODEL.md` §3). DoD met: `testMigrationCreatesSchema` applies v1 cleanly; `PRAGMA journal_mode = WAL` on open.
+- [x] **T1.2** Implement `IndexStoring` async protocol + in-memory test double. DoD met: `InMemoryIndexStore` + `testBehaviorContract` cover files/groups/sessions/sources CRUD.
+- [x] **T1.3** Implement incremental signature lookup (skip-unchanged). DoD met: `IndexStoring.unchangedFileIDs(matching:)` + `ScanRequest.knownSignatures`; `testIncrementalRunSkipsUnchangedFiles` proves unchanged files are never re-hashed.
 
 ## Milestone 2 — Engine: Stage 0 & 1
 - [x] **T2.1** `Enumerator` (Stage 0): walk roots, apply scope + ignore + hidden rules, compute signatures, size-bucket. DoD met: `FileEnumerator(scopes:).enumerate(roots:)` drives the cascade; covered by scope-filter, unreadable-skip, and zero-byte fixture tests (DetectionEngineTests/ScanCoordinatorTests).
