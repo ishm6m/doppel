@@ -185,7 +185,9 @@ struct RootView: View {
         selection = []
         scanTask = Task {
             do {
-                try await scanService.startScan(ScanRequest(roots: roots, scopes: [.document]), rootBookmarkIDs: bookmarkIDs)
+                // Scopes + thresholds come from Settings (F11), so a settings change takes effect here.
+                let request = ScanRequest(roots: roots, scopes: DetectionSettings.scopes, config: DetectionSettings.config)
+                try await scanService.startScan(request, rootBookmarkIDs: bookmarkIDs)
             } catch is CancellationError {
                 // Expected when the user hits Cancel; ScanService still finalizes the session.
             } catch {
@@ -575,16 +577,6 @@ private struct InspectorPlaceholder: View {
     var body: some View {
         Text("Select a group to see details")
             .foregroundStyle(.secondary)
-    }
-}
-
-struct SettingsPlaceholderView: View {
-    var body: some View {
-        Form {
-            Text("Settings arrive in Milestone 6.")
-        }
-        .formStyle(.grouped)
-        .frame(width: 480, height: 320)
     }
 }
 

@@ -23,6 +23,9 @@ public protocol IndexStoring: Sendable {
     func ignoreGroup(_ groupID: Int64) async throws
     func ignorePair(_ a: Int64, _ b: Int64) async throws
     func ignoredPairs() async throws -> Set<Pair>
+    /// Clears the not-duplicates list (Settings ▸ Ignore List "Reset"); previously-ignored groups
+    /// can resurface on the next scan.
+    func clearIgnoredPairs() async throws
 
     // Embeddings
     func saveEmbedding(_ embedding: Embedding) async throws -> Int64
