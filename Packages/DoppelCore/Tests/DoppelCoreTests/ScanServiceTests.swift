@@ -93,6 +93,29 @@ final class ScanServiceTests: XCTestCase {
         XCTAssertEqual(svc.total, 2)
     }
 
+    /// Per-file failures are captured as "Skipped (N)" and never fail the scan (T8.1). A corrupt file
+    /// in the middle of the stream still lets the surrounding group + summary land.
+    func testSkippedFilesAreCapturedAndScanStillSucceeds() async throws {
+        let store = InMemoryIndexStore()
+        let group = DuplicateGroup(
+            id: 0, matchType: .exact, confidence: 1.0,
+            explanation: "Identical file contents", keeperFileID: 1, memberFileIDs: [1, 2]
+        )
+        let svc = ScanService(coordinator: StubCoordinator(events: [
+            .discovered(total: 3),
+            .fileSkipped(file(3, "scan.pdf"), FileIssue(kind: .needsOCR, message: "Scanned PDF — no text layer")),
+            .groupFound(group, members: [file(1, "a.txt"), file(2, "b.txt")]),
+            .finished(summary: ScanSummary(filesDiscovered: 3, groupsFound: 1))
+        ]), store: store)
+
+        try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]))
+
+        XCTAssertEqual(svc.skipped.map(\.file.displayName), ["scan.pdf"])
+        XCTAssertEqual(svc.skipped.first?.issue.kind, .needsOCR)
+        XCTAssertEqual(svc.groups.count, 1, "the scan still completes and surfaces the group")
+        XCTAssertEqual(svc.summary?.groupsFound, 1)
+    }
+
     /// A cancelled scan finalizes the session as `.cancelled` (terminal state still recorded).
     func testCancelledScanMarksSessionCancelled() async throws {
         let store = InMemoryIndexStore()
