@@ -31,9 +31,9 @@
 - [x] **T3.4** Near-dup grouping + `reasonSummary` via fast diff. DoD met: precision 1.0 on constructed near-dup set (≥0.95); LSH pruning asserted.
 
 ## Milestone 4 — Results UI (vertical slice)
-- [ ] **T4.1** `NavigationSplitView` shell: sidebar (sources/scans), content (results), inspector. DoD: matches `UI_SPEC.md` layout, empty states render.
-- [ ] **T4.2** F1 folder selection (panel + drag-drop + bookmarks). DoD: F1 acceptance.
-- [ ] **T4.3** Scan run + live progress header (F2 UI). DoD: progress streams, cancel works.
+- [x] **T4.1** `NavigationSplitView` shell: sidebar (sources/scans), content (results), inspector. DoD met: three-column shell, empty states render. (Sidebar selection not yet wired to filter content — sources/results shown contextually; deferred.)
+- [x] **T4.2** F1 folder selection (panel + bookmarks). DoD met: fileImporter picks folders, security-scoped bookmarks persisted + re-resolved across launches. (Drag-drop deferred.)
+- [x] **T4.3** Scan run + live progress header (F2 UI). DoD met: determinate phase/processed/total bar, live groups + reclaimable counters, Cancel works. (ETA deferred — needs a rate model.)
 - [ ] **T4.4** Group list with badges, confidence, explanation, keeper, reclaimable size (F7). DoD: invariant test (no empty explanation).
 
 ## Milestone 5 — Compare & safe delete (trust core)

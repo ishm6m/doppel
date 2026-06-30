@@ -75,6 +75,24 @@ final class ScanServiceTests: XCTestCase {
         XCTAssertEqual(svc.membersByID[2]?.displayName, "b.txt")
     }
 
+    /// The header counts (phase, processed/total) mirror the last progress event so the UI can show
+    /// a determinate bar like "Hashing 2 / 2" (T4.3 / F2). `.discovered` seeds the total up front.
+    func testProgressCountsSurfaceForHeader() async throws {
+        let store = InMemoryIndexStore()
+        let svc = ScanService(coordinator: StubCoordinator(events: [
+            .discovered(total: 2),
+            .progress(phase: .hashing, processed: 1, total: 2),
+            .progress(phase: .hashing, processed: 2, total: 2),
+            .finished(summary: ScanSummary(filesDiscovered: 2))
+        ]), store: store)
+
+        try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")]))
+
+        XCTAssertEqual(svc.phase, .hashing)
+        XCTAssertEqual(svc.processed, 2)
+        XCTAssertEqual(svc.total, 2)
+    }
+
     /// A cancelled scan finalizes the session as `.cancelled` (terminal state still recorded).
     func testCancelledScanMarksSessionCancelled() async throws {
         let store = InMemoryIndexStore()
