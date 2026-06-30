@@ -90,6 +90,14 @@ struct RootView: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        if !isScanning, scanService.canUndoTrash {
+            ToolbarItem(placement: .secondaryAction) {
+                Button { undoTrash() } label: {
+                    Label("Undo Delete", systemImage: "arrow.uturn.backward")
+                }
+                .keyboardShortcut("z", modifiers: .command)
+            }
+        }
         ToolbarItem(placement: .primaryAction) {
             if isScanning {
                 Button(role: .cancel) { scanTask?.cancel() } label: {
@@ -141,6 +149,12 @@ struct RootView: View {
         selection = []
         Task {
             do { try await scanService.trash(ids) } catch { scanError = error.localizedDescription }
+        }
+    }
+
+    private func undoTrash() {
+        Task {
+            do { try await scanService.undoLastTrash() } catch { scanError = error.localizedDescription }
         }
     }
 }
