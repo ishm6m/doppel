@@ -108,6 +108,33 @@ final class ScanServiceTests: XCTestCase {
         XCTAssertTrue(svc.groups.isEmpty)
     }
 
+    /// Scan history (F12): a finished scan is listed by a fresh service, and reopening it reloads the
+    /// persisted groups + member records into the results state.
+    func testReopenSessionRestoresGroups() async throws {
+        let store = InMemoryIndexStore()
+        let group = DuplicateGroup(
+            id: 0, matchType: .exact, confidence: 1.0,
+            explanation: "Identical file contents", keeperFileID: 1, memberFileIDs: [1, 2]
+        )
+        let writer = ScanService(coordinator: StubCoordinator(events: [
+            .groupFound(group, members: [file(1, "a.txt"), file(2, "b.txt")]),
+            .finished(summary: ScanSummary(filesDiscovered: 2, groupsFound: 1, bytesReclaimable: 10))
+        ]), store: store)
+        let sessionID = try await writer.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]))
+
+        // A fresh service (as on relaunch) sees the scan in history and can reopen it.
+        let reader = ScanService(coordinator: StubCoordinator(events: []), store: store)
+        await reader.loadSessions()
+        XCTAssertEqual(reader.sessions.map(\.id), [sessionID])
+        XCTAssertTrue(reader.groups.isEmpty)
+
+        try await reader.openSession(sessionID)
+        XCTAssertEqual(reader.groups.count, 1)
+        XCTAssertEqual(reader.groups.first?.memberFileIDs, [1, 2])
+        XCTAssertEqual(reader.membersByID[1]?.displayName, "a.txt")
+        XCTAssertEqual(reader.membersByID[2]?.displayName, "b.txt")
+    }
+
     /// Ignoring a group (F7/F14) removes it from the live results, persists its member pairs, and a
     /// later scan that re-finds the same set drops it before it surfaces — it doesn't recur.
     func testIgnoredGroupDoesNotRecurOnRescan() async throws {
