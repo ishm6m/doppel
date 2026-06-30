@@ -25,7 +25,7 @@
 - [x] **T2.3** `ScanCoordinator` actor emitting `ScanEvent` `AsyncStream`, cancellation, incremental persistence. DoD: cancel-at-50% consistency test passes.
 
 ## Milestone 3 — Engine: Stage 2 (the headline)
-- [ ] **T3.1** Text extractors: txt/md done (`PlainTextExtractor`). RTF/`.docx` deferred — RTF needs AppKit, .docx needs vendored unzip+XML; both would touch the pure engine, decide then.
+- [x] **T3.1** Text extractors: txt/md (`PlainTextExtractor`) + **`.docx`** (`DocxTextExtractor`). DoD met: .docx is read with a pure-Swift central-directory ZIP parser + Foundation `Compression` (raw DEFLATE) and OOXML→text stripping — no dependency, no AppKit, engine stays pure. Wired into the coordinator + compare dispatch; covered by `DocxExtractTests` (real base64 .docx fixture → exact normalized text, corrupt-blob → no text, run/entity handling). **RTF still deferred** (NSAttributedString is AppKit-only and would taint the engine); revisit behind a host-side extractor if needed.
 - [x] **T3.2** PDF extractor (PDFKit text layer) + scanned-PDF classification (F5). DoD met: `PDFTextExtractor` classifies text-layer vs scanned (sparse-layer heuristic); text-PDFs routed into Stage 2 near-dup, scanned PDFs surfaced as `.needsOCR` skips (never dropped). Vision OCR pass itself is opt-in, deferred (F5 "Run OCR" / T7-era).
 - [x] **T3.3** Shingling + MinHash (128 perms) + LSH banding (16×8) + Jaccard estimate. DoD met: near-dup pair detected; threshold via `DetectionConfig`.
 - [x] **T3.4** Near-dup grouping + `reasonSummary` via fast diff. DoD met: precision 1.0 on constructed near-dup set (≥0.95); LSH pruning asserted.

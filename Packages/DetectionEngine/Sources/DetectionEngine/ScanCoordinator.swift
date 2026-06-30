@@ -118,11 +118,13 @@ public actor ScanCoordinator: ScanCoordinating {
     ) async -> [NearTextStage.Input] {
         let plain = PlainTextExtractor()
         let pdf = PDFTextExtractor()
+        let docx = DocxTextExtractor()
         var inputs: [NearTextStage.Input] = []
         for f in files {
             let ext = f.url.pathExtension.lowercased()
             let extractor: ContentExtractor? = PlainTextExtractor.handledExtensions.contains(ext) ? plain
-                : PDFTextExtractor.handledExtensions.contains(ext) ? pdf : nil
+                : PDFTextExtractor.handledExtensions.contains(ext) ? pdf
+                : DocxTextExtractor.handledExtensions.contains(ext) ? docx : nil
             guard let extractor else { continue }
             do {
                 let content = try await extractor.extract(f.url)
