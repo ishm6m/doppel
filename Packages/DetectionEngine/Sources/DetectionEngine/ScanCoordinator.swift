@@ -116,11 +116,22 @@ public actor ScanCoordinator: ScanCoordinating {
         _ summary: inout ScanSummary,
         _ c: AsyncThrowingStream<ScanEvent, Error>.Continuation
     ) async -> [NearTextStage.Input] {
-        let extractor = PlainTextExtractor()
+        let plain = PlainTextExtractor()
+        let pdf = PDFTextExtractor()
         var inputs: [NearTextStage.Input] = []
-        for f in files where PlainTextExtractor.handledExtensions.contains(f.url.pathExtension.lowercased()) {
+        for f in files {
+            let ext = f.url.pathExtension.lowercased()
+            let extractor: ContentExtractor? = PlainTextExtractor.handledExtensions.contains(ext) ? plain
+                : PDFTextExtractor.handledExtensions.contains(ext) ? pdf : nil
+            guard let extractor else { continue }
             do {
-                if let text = try await extractor.extract(f.url).normalizedText, !text.isEmpty {
+                let content = try await extractor.extract(f.url)
+                if content.needsOCR {
+                    // F5: scanned PDF surfaced (never silently dropped) for the opt-in OCR pass. The UI
+                    // maps .needsOCR skips into a "Needs OCR (N)" bucket; it doesn't enter near-dup empty.
+                    c.yield(.fileSkipped(f.record, FileIssue(kind: .needsOCR, message: "Scanned PDF — no text layer; OCR required")))
+                    summary.skippedCount += 1
+                } else if let text = content.normalizedText, !text.isEmpty {
                     inputs.append(.init(record: f.record, text: text))
                 }
             } catch {

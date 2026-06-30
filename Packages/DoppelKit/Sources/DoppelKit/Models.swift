@@ -26,7 +26,7 @@ public enum ScanState: String, Sendable, Codable {
 
 public struct FileIssue: Sendable, Codable, Hashable {
     public enum Kind: String, Sendable, Codable {
-        case unreadable, unsupported, decodeFailed, tooLarge, permissionDenied
+        case unreadable, unsupported, decodeFailed, tooLarge, permissionDenied, needsOCR
     }
 
     public let kind: Kind
