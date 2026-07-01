@@ -55,16 +55,22 @@ jobs:
       - name: Forbid network egress
         # Golden rule 1 / T8.4 / SECURITY.md §3: nothing in the engine, store, or app opens a network
         # connection — no file-derived data can leave. The ONLY permitted egress is the Sparkle update
-        # check, which is added in a separate documented build config when it lands; until then there is
-        # zero networking code, which this proves statically (stronger than one runtime "no connection").
-        # When Sparkle is integrated, scope it to its own file and add it to the exclusion below.
+        # check (RELEASE.md §5), and even that lives in Sparkle's own framework, not our source: our
+        # wiring (App/Doppel/App/Updater.swift) only drives SPUStandardUpdaterController and contains no
+        # networking API, so this static grep still passes with zero exclusions.
         run: |
           if grep -rnE 'URLSession|URLRequest|URLConnection|NWConnection|NWListener|NWPathMonitor|NWBrowser|CFSocket|CFStream|import Network|getaddrinfo|[^a-zA-Z]socket\(|\.dataTask|\.downloadTask|\.uploadTask' --include='*.swift' Packages/*/Sources App; then
-            echo "::error::No networking allowed (privacy is the product). Only Sparkle may connect, in its own scoped build config."
+            echo "::error::No networking allowed (privacy is the product). Only Sparkle may connect, from its own framework."
             exit 1
           fi
-          # No network entitlement in the app sandbox (SECURITY.md §3).
+          # Privacy by default: the Debug/default entitlements request ZERO network.
           if grep -nE 'com\.apple\.security\.network\.(client|server)' App/Doppel/Resources/Doppel.entitlements; then
-            echo "::error::App must not request the network entitlement"
+            echo "::error::Default entitlements must request NO network (privacy by default)"
+            exit 1
+          fi
+          # Release entitlements: network.client is the single sanctioned egress (Sparkle updates).
+          # network.server stays banned — the app never listens.
+          if grep -nE 'com\.apple\.security\.network\.server' App/Doppel/Resources/Doppel.release.entitlements; then
+            echo "::error::Release entitlements must not request network.server (only Sparkle's network.client is allowed)"
             exit 1
           fi

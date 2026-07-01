@@ -34,6 +34,23 @@
 - Update check is the **only** network call; isolated for the egress test.
 - Release notes per version; user can disable auto-check.
 
+**Wiring (done — T8.5):** Sparkle 2 is a package dep (`project.yml`); the updater and the "Check for
+Updates…" menu item live in `App/Doppel/App/Updater.swift` (the sole network touch-point). Feed URL and
+public key are Info.plist keys. The network entitlement is Release-only (`Doppel.release.entitlements`),
+so Debug builds and the egress guard stay network-free.
+
+**First-release setup (maintainer, one-time — needs Apple credentials):**
+1. Generate the EdDSA key pair once: `./bin/generate_keys` (from the Sparkle release tools). It stores
+   the **private** key in your login keychain and prints the **public** key.
+2. In `project.yml` under the `Doppel` target's `info.properties`, replace the two placeholders:
+   `SUPublicEDKey` → the printed public key; `SUFeedURL` → your real appcast URL. Run `xcodegen generate`.
+3. Store notary credentials once: `xcrun notarytool store-credentials <PROFILE> --apple-id … --team-id …
+   --password <app-specific-pw>`.
+4. Build + notarize: `DEVELOPER_ID="Developer ID Application: … (TEAMID)" TEAM_ID=… NOTARY_PROFILE=<PROFILE>
+   ./Scripts/release.sh`.
+5. Appcast: run Sparkle's `./bin/generate_appcast <updates-dir>` over the notarized `.zip`; publish
+   `appcast.xml` + zip to the feed host. Keep the prior build + entry for rollback (§7).
+
 ## 6. Release checklist (gate)
 - [ ] All `TASKS.md` for the milestone `[x]`; DoDs met.
 - [ ] CI green: build, lint, format, unit+integration, snapshot, perf (budgets met), **egress test**, entitlements snapshot.
