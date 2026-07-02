@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="doppel_dark_logo.png">
+    <source media="(prefers-color-scheme: light)" srcset="doppel_light_logo.png">
+    <img alt="Doppel" src="doppel_light_logo.png" width="160" height="160">
+  </picture>
+</p>
+
 # Doppel
 
 > Find duplicate **and near-duplicate** files by what they *contain*, not just their name and size. 100% offline. Open source.
