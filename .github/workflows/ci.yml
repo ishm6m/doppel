@@ -54,23 +54,16 @@ jobs:
 
       - name: Forbid network egress
         # Golden rule 1 / T8.4 / SECURITY.md §3: nothing in the engine, store, or app opens a network
-        # connection — no file-derived data can leave. The ONLY permitted egress is the Sparkle update
-        # check (RELEASE.md §5), and even that lives in Sparkle's own framework, not our source: our
-        # wiring (App/Doppel/App/Updater.swift) only drives SPUStandardUpdaterController and contains no
-        # networking API, so this static grep still passes with zero exclusions.
+        # connection — no file-derived data can leave. The app has NO updater egress: updates ship via
+        # Homebrew (`brew upgrade`), so there is zero networking code and zero network entitlement, which
+        # this proves statically (stronger than any runtime "no connection" check).
         run: |
           if grep -rnE 'URLSession|URLRequest|URLConnection|NWConnection|NWListener|NWPathMonitor|NWBrowser|CFSocket|CFStream|import Network|getaddrinfo|[^a-zA-Z]socket\(|\.dataTask|\.downloadTask|\.uploadTask' --include='*.swift' Packages/*/Sources App; then
-            echo "::error::No networking allowed (privacy is the product). Only Sparkle may connect, from its own framework."
+            echo "::error::No networking allowed (privacy is the product)."
             exit 1
           fi
-          # Privacy by default: the Debug/default entitlements request ZERO network.
+          # No network entitlement in the app sandbox (SECURITY.md §3).
           if grep -nE 'com\.apple\.security\.network\.(client|server)' App/Doppel/Resources/Doppel.entitlements; then
-            echo "::error::Default entitlements must request NO network (privacy by default)"
-            exit 1
-          fi
-          # Release entitlements: network.client is the single sanctioned egress (Sparkle updates).
-          # network.server stays banned — the app never listens.
-          if grep -nE 'com\.apple\.security\.network\.server' App/Doppel/Resources/Doppel.release.entitlements; then
-            echo "::error::Release entitlements must not request network.server (only Sparkle's network.client is allowed)"
+            echo "::error::App must not request the network entitlement"
             exit 1
           fi

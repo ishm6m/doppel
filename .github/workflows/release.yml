@@ -1,0 +1,35 @@
+name: Release
+
+# Tag-triggered open-source release: build an ad-hoc-signed zip (no Apple account needed) and attach it
+# to a GitHub Release. Runs on the same self-hosted Apple Silicon Mac as the CI gate.
+#   git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: [self-hosted, macOS]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ad-hoc release zip
+        # /opt/homebrew/bin holds xcodegen; the launchd runner's PATH is minimal, so add it explicitly.
+        run: |
+          export PATH="/opt/homebrew/bin:$PATH"
+          command -v xcodegen >/dev/null || brew install xcodegen
+          ./Scripts/release.sh
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA=$(shasum -a 256 build/release/Doppel.zip | cut -d' ' -f1)
+          gh release create "$GITHUB_REF_NAME" build/release/Doppel.zip \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Ad-hoc signed, not notarized. First launch: right-click Doppel.app ▸ Open, or \`brew install --cask --no-quarantine doppel\`.
+
+          Homebrew cask bump for this release — version \`${GITHUB_REF_NAME#v}\`, sha256 \`$SHA\`."

@@ -16,7 +16,7 @@ The name `Doppel` is a placeholder; the product name lives in one constant (`App
 
 ## 1. Golden rules (never violate)
 
-1. **Privacy is the product.** No network calls that transmit file content, file names, paths, hashes, or embeddings. The *only* permitted outbound network traffic is the Sparkle update check and explicit user-initiated "check for updates." If you are about to add a dependency that phones home, stop and flag it.
+1. **Privacy is the product.** No network calls, period — the app opens **zero** network connections and requests no network entitlement (updates ship via Homebrew, out of process). No file content, names, paths, hashes, or embeddings ever leave the machine. If you are about to add a dependency that phones home or any networking code, stop and flag it.
 2. **Never destroy data irreversibly.** The app **never** calls `unlink`/`FileManager.removeItem` on user files. Deletion = move to Trash via `NSWorkspace.recycle` / `FileManager.trashItem`, always undoable.
 3. **Never auto-delete or pre-check files for deletion.** The app *suggests* a "keeper"; the human confirms every destructive action.
 4. **Always explain a match.** Every duplicate grouping must carry a human-readable reason and a confidence score (see `FEATURES.md` → Match Explanation). A group with no explanation is a bug.
@@ -53,7 +53,7 @@ When starting a task, read in this order and stop when you have enough context:
 | Text extraction | Native parsers; for `.docx`/`.xlsx` use a vendored lightweight unzip+XML reader | Avoid heavy deps. |
 | Perceptual hash | Custom dHash/pHash impl (small, no dep) | V2 (images). |
 | Near-dup text | MinHash + LSH (custom impl) | Core of MVP. |
-| Updater | Sparkle 2 | Standard, notarization-friendly. |
+| Updater | **Homebrew Cask** (`brew upgrade`); no in-app updater | No paid Apple account → ad-hoc-signed OSS build; dropping Sparkle keeps golden rule 1 absolute (zero network egress). Sparkle 2 was integrated then removed (2026-07-02) after this decision. |
 | Logging | `OSLog` (`Logger`) with subsystem `com.doppel.app` | Native, privacy-aware. |
 | DI | Manual constructor injection + a small `AppEnvironment` container | No DI framework. |
 | Tests | XCTest + ViewInspector (snapshot via swift-snapshot-testing) | See `TESTING.md`. |
