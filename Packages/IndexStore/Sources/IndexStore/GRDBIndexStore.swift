@@ -142,8 +142,18 @@ public actor GRDBIndexStore: IndexStoring {
     }
 
     public func removeSource(id: Int64) async throws {
-        // FK ON DELETE CASCADE drops the source's file_records (DATA_MODEL.md §3).
+        // FK ON DELETE CASCADE drops the source's file_records (DATA_MODEL.md §3). But
+        // duplicate_group.keeper_file_id has NO cascade (a group must always have a keeper), so a
+        // group whose keeper lives in this source would violate that FK mid-cascade. Drop those
+        // groups first (their members/edges cascade), then the source.
         try await dbQueue.write { db in
+            try db.execute(
+                sql: """
+                DELETE FROM duplicate_group
+                WHERE keeper_file_id IN (SELECT id FROM file_record WHERE bookmark_id = ?)
+                """,
+                arguments: [id]
+            )
             try db.execute(sql: "DELETE FROM source_bookmark WHERE id = ?", arguments: [id])
         }
     }

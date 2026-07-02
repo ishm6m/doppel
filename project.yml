@@ -25,7 +25,7 @@ settings:
     PRODUCT_BUNDLE_IDENTIFIER: com.doppel.app
     GENERATE_INFOPLIST_FILE: YES
     INFOPLIST_KEY_NSHumanReadableCopyright: ""
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "0.1.1"
     CURRENT_PROJECT_VERSION: "1"
 
 packages:
