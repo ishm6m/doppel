@@ -3,6 +3,19 @@
 All notable changes to Doppel are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions follow SemVer (`RELEASE.md` §1).
 
+## [0.1.1] — 2026-07-02
+
+### Fixed
+- **Scan no longer fails with "FOREIGN KEY constraint failed."** Files are now persisted with their
+  real `source_bookmark` id instead of the engine's internal root index, so the scan index writes
+  cleanly. Regression-tested against the real GRDB store (FK enforcement on).
+- **Removing a scanned folder no longer fails with "FOREIGN KEY constraint failed."** A folder whose
+  file was a duplicate group's keeper now drops that group before deleting the source, instead of
+  tripping the keeper foreign key mid-cascade. Regression-tested against the real GRDB store.
+
+### Changed
+- **About** now links to [getdoppel.vercel.app](https://getdoppel.vercel.app).
+
 ## [0.1.0] — Documents MVP — 2026-07-02
 
 First public release. **100% offline, open source (MIT), ad-hoc signed** (not notarized —
@@ -36,4 +49,5 @@ documents by content, not name/size.
 - Images are V2; semantic tier uses a stub embedding model until one is pinned (0.2.x).
 - Drag-drop folder add, ETA in the progress header, and RTF extraction are deferred.
 
+[0.1.1]: https://github.com/ishm6m/doppel/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ishm6m/doppel/releases/tag/v0.1.0
