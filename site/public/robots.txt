@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://site-eight-psi-74.vercel.app/sitemap.xml
+Sitemap: https://getdoppel.vercel.app/sitemap.xml
