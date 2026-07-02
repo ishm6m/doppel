@@ -130,6 +130,10 @@ private struct AboutSettings: View {
             }
             LabeledContent("Name", value: AppInfo.productName)
             LabeledContent("Version", value: AppInfo.version)
+            LabeledContent("Website") {
+                // SAFETY: static, well-formed literal URL.
+                Link("getdoppel.vercel.app", destination: URL(string: "https://getdoppel.vercel.app")!)
+            }
             Text("100% offline. No file, name, path, or fingerprint ever leaves your Mac.")
                 .font(.caption).foregroundStyle(.secondary)
         }
