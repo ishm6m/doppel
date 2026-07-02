@@ -1,6 +1,19 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="doppel_dark_logo.png">
+    <source media="(prefers-color-scheme: light)" srcset="doppel_light_logo.png">
+    <img alt="Doppel" src="doppel_light_logo.png" width="160" height="160">
+  </picture>
+</p>
+
 # Doppel
 
 > Find duplicate **and near-duplicate** files by what they *contain*, not just their name and size. 100% offline. Open source.
+
+<p align="center">
+  <!-- Placeholder — replace docs/assets/screenshot.png with a real product shot or demo GIF. -->
+  <img src="docs/assets/screenshot.png" alt="Doppel screenshot" width="720">
+</p>
 
 > **Purpose:** Orient any human (or Claude Code) landing in this repo for the first time.
 > **Scope:** What Doppel is, how to set it up, and where to go next.

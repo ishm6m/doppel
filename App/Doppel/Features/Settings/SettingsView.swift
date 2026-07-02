@@ -119,11 +119,20 @@ private struct IgnoreListSettings: View {
 private struct AboutSettings: View {
     var body: some View {
         Form {
+            HStack {
+                Spacer()
+                Image("DoppelLogo")
+                    .resizable().scaledToFit()
+                    .frame(width: 72, height: 72)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .accessibilityLabel("\(AppInfo.productName) logo")
+                Spacer()
+            }
             LabeledContent("Name", value: AppInfo.productName)
             LabeledContent("Version", value: AppInfo.version)
             Text("100% offline. No file, name, path, or fingerprint ever leaves your Mac.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .formStyle(.grouped).padding(.vertical, 8).frame(height: 220)
+        .formStyle(.grouped).padding(.vertical, 8).frame(height: 300)
     }
 }
