@@ -3,7 +3,7 @@
 All notable changes to Doppel are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions follow SemVer (`RELEASE.md` §1).
 
-## [0.1.0] — Documents MVP (unreleased)
+## [0.1.0] — Documents MVP — 2026-07-02
 
 First public release. **100% offline, open source (MIT), ad-hoc signed** (not notarized —
 approve once on first launch; see README → Install). Finds duplicate **and near-duplicate**
