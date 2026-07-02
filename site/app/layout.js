@@ -1,6 +1,6 @@
 import "./globals.css";
 
-const SITE = "https://site-eight-psi-74.vercel.app";
+const SITE = "https://getdoppel.vercel.app";
 
 export const metadata = {
   metadataBase: new URL(SITE),
