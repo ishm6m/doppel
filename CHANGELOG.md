@@ -9,6 +9,9 @@ All notable changes to Doppel are documented here. Format loosely follows
 - **Scan no longer fails with "FOREIGN KEY constraint failed."** Files are now persisted with their
   real `source_bookmark` id instead of the engine's internal root index, so the scan index writes
   cleanly. Regression-tested against the real GRDB store (FK enforcement on).
+- **Removing a scanned folder no longer fails with "FOREIGN KEY constraint failed."** A folder whose
+  file was a duplicate group's keeper now drops that group before deleting the source, instead of
+  tripping the keeper foreign key mid-cascade. Regression-tested against the real GRDB store.
 
 ### Changed
 - **About** now links to [getdoppel.vercel.app](https://getdoppel.vercel.app).

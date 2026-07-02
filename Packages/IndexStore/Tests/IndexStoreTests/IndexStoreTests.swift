@@ -25,6 +25,26 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
     let cascaded = try await store.file(id: 1)
     XCTAssertNil(cascaded) // cascade removed the file
 
+    // Regression: removing a source whose file is a group's keeper must not trip the keeper FK
+    // (duplicate_group.keeper_file_id has no ON DELETE cascade). Throws on GRDB before the fix.
+    let ksid = try await store.addSource(SourceBookmark(id: 0, bookmarkData: Data(), displayPath: "/k"))
+    try await store.upsertFiles([
+        FileRecord(id: 101, bookmarkID: ksid, relativePath: "k1", displayName: "k1", sizeBytes: 5, mtime: .now, typeScope: .document),
+        FileRecord(id: 102, bookmarkID: ksid, relativePath: "k2", displayName: "k2", sizeBytes: 5, mtime: .now, typeScope: .document)
+    ])
+    let ksess = try await store.createSession(ScanSession(id: 0, rootBookmarkIDs: [ksid], scopes: [.document]))
+    let kgid = try await store.saveGroup(
+        DuplicateGroup(id: 0, matchType: .exact, confidence: 1.0, explanation: "id", keeperFileID: 101, memberFileIDs: [101, 102]),
+        members: [101, 102],
+        edges: [],
+        sessionID: ksess
+    )
+    try await store.removeSource(id: ksid) // must not throw
+    let keeperGroup = try await store.groups(sessionID: ksess).first { $0.id == kgid }
+    XCTAssertNil(keeperGroup, "keeper's group is dropped")
+    let keeperFile = try await store.file(id: 101)
+    XCTAssertNil(keeperFile)
+
     // A persistent source to parent the remaining file-based assertions.
     let src = try await store.addSource(SourceBookmark(id: 0, bookmarkData: Data(), displayPath: "/docs"))
 
