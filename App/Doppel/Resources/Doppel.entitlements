@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Least-privilege entitlements (SECURITY.md §3).
-  NOTE: no network.client entitlement for the app. If Sparkle requires it for updates,
-  add it in a separate, documented build configuration and keep the egress test green.
+  Least-privilege entitlements (SECURITY.md §3). Sandbox + user-selected read-write + app-scope
+  bookmarks, and deliberately NO network entitlement — the app opens zero connections (golden rule 1);
+  updates ship via Homebrew, out of process. Do not add a network entitlement.
 -->
 <plist version="1.0">
 <dict>
