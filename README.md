@@ -35,10 +35,29 @@ MVP in development. Scope: **documents (text + PDF) first**, images in V2. See `
 - Apple Silicon recommended (Intel supported with reduced ML performance)
 - Xcode 16+ and Swift 6 toolchain to build from source
 
+## Install
+
+Doppel is free and open source. Because it's built without a paid Apple Developer account, the release
+is **ad-hoc signed, not notarized** — so macOS Gatekeeper will ask you to approve it once on first launch.
+That's normal for open-source Mac apps and does not affect the privacy guarantees.
+
+**Homebrew (recommended — handles updates via `brew upgrade`):**
+```bash
+brew install --cask --no-quarantine ishm6m/doppel/doppel
+```
+(`--no-quarantine` skips the Gatekeeper prompt. Omit it and instead right-click ▸ Open once if you prefer.)
+
+**Or download the app directly:**
+1. Grab `Doppel.zip` from the [latest release](https://github.com/ishm6m/doppel/releases/latest), unzip, move `Doppel.app` to `/Applications`.
+2. First launch: **right-click Doppel.app ▸ Open** and confirm (or run `xattr -dr com.apple.quarantine /Applications/Doppel.app`). You only do this once.
+
+Updates ship through Homebrew — there is **no in-app updater**, so the app makes zero network connections (see `SECURITY.md`).
+
 ## Quick start (build from source)
 
 ```bash
-git clone <repo-url> doppel && cd doppel
+git clone https://github.com/ishm6m/doppel.git && cd doppel
+brew install xcodegen && xcodegen generate
 xcodebuild -scheme Doppel -configuration Debug build
 open ./build/Debug/Doppel.app   # or run from Xcode
 ```
@@ -79,10 +98,11 @@ Start with `CLAUDE.md`, then `PRD.md` → `ARCHITECTURE.md` → `DATA_MODEL.md` 
 
 ## License
 
-Open-core. Source under MIT (or your chosen OSI license); the signed, notarized, auto-updating build is the paid convenience. See `RELEASE.md` → Distribution.
+[MIT](LICENSE). Fully open source — use, modify, and redistribute freely. Distribution is via GitHub
+Releases + Homebrew; see `RELEASE.md` → Distribution.
 
 ## Open Questions
-- Final license choice (MIT vs Apache-2.0).
+- _(none currently)_
 
 ## Future Improvements
 - CLI distribution via Homebrew.

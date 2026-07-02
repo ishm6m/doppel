@@ -1,80 +1,54 @@
 #!/usr/bin/env bash
 #
-# release.sh — archive → sign (Developer ID) → notarize → staple → verify, then stage for the Sparkle
-# appcast. Implements RELEASE.md §3. Everything credential-specific comes from env vars so no secret is
-# ever committed. Run on the maintainer's Mac with the Developer ID cert already in the keychain.
+# release.sh — build a distributable Doppel.app with NO Apple Developer account: ad-hoc code signing +
+# a zip + a SHA-256 for the Homebrew cask. Implements the open-source distribution model (RELEASE.md).
 #
-# ponytail: NOT verifiable end-to-end without a real Developer ID cert + notary creds, so it is written
-# to fail fast on missing inputs rather than pretend. Ships a .zip (Sparkle's native delivery), not a
-# DMG — add a DMG step only if you distribute outside Sparkle too.
+# There is no notarization (that needs a paid Developer ID). Users get past Gatekeeper once on first
+# launch (right-click ▸ Open, or `brew install --cask --no-quarantine`, or `xattr -dr
+# com.apple.security.quarantine Doppel.app`) — documented in README. Updates ship via `brew upgrade`.
 #
-# Required env:
-#   DEVELOPER_ID   e.g. "Developer ID Application: Jane Dev (TEAMID123)"
-#   TEAM_ID        Apple Developer Team ID, e.g. TEAMID123
-#   NOTARY_PROFILE keychain profile name created once via:
-#                    xcrun notarytool store-credentials NOTARY_PROFILE \
-#                      --apple-id you@example.com --team-id TEAMID123 --password <app-specific-pw>
-# Optional env:
-#   CONFIG         build configuration (default: Release)
-#   OUT_DIR        output dir (default: ./build/release)
+# ponytail: ad-hoc signing (codesign -s -) is the whole trick — free, no account, and the app still runs
+# once quarantine is cleared. Skipped notarization/DMG entirely; add them only if you ever get a cert.
+#
+# Usage: ./Scripts/release.sh              # builds ./build/release/Doppel.zip (+ prints sha256)
+# Env:   CONFIG (default Release), OUT_DIR (default build/release)
 set -euo pipefail
 
-: "${DEVELOPER_ID:?set DEVELOPER_ID (see header)}"
-: "${TEAM_ID:?set TEAM_ID}"
-: "${NOTARY_PROFILE:?set NOTARY_PROFILE (xcrun notarytool store-credentials …)}"
 CONFIG="${CONFIG:-Release}"
 OUT_DIR="${OUT_DIR:-build/release}"
-
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-rm -rf "$OUT_DIR"
-mkdir -p "$OUT_DIR"
+rm -rf "$OUT_DIR"; mkdir -p "$OUT_DIR"
 ARCHIVE="$OUT_DIR/Doppel.xcarchive"
 APP="$OUT_DIR/Doppel.app"
+ZIP="$OUT_DIR/Doppel.zip"
 
 echo "▸ Regenerating project from project.yml"
 xcodegen generate
 
-echo "▸ Archiving ($CONFIG, Developer ID, hardened runtime)"
+echo "▸ Archiving ($CONFIG, ad-hoc signed, hardened runtime)"
 xcodebuild -scheme Doppel -configuration "$CONFIG" -destination 'generic/platform=macOS' \
   -archivePath "$ARCHIVE" archive \
-  CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$DEVELOPER_ID" DEVELOPMENT_TEAM="$TEAM_ID"
+  CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual
 
-echo "▸ Exporting Developer ID app"
-EXPORT_PLIST="$OUT_DIR/ExportOptions.plist"
-cat >"$EXPORT_PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>method</key><string>developer-id</string>
-  <key>teamID</key><string>$TEAM_ID</string>
-  <key>signingStyle</key><string>manual</string>
-</dict></plist>
-PLIST
-xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportOptionsPlist "$EXPORT_PLIST" \
-  -exportPath "$OUT_DIR"
+# Copy the built .app out of the archive (no -exportArchive: Developer-ID export needs a real identity).
+cp -R "$ARCHIVE/Products/Applications/Doppel.app" "$APP"
 
-echo "▸ Notarizing (submit + wait)"
-ZIP="$OUT_DIR/Doppel.zip"
-ditto -c -k --keepParent "$APP" "$ZIP"
-xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
-
-echo "▸ Stapling the ticket"
-xcrun stapler staple "$APP"
-
-echo "▸ Verifying (Gatekeeper + codesign + entitlements)"
-spctl --assess --type execute --verbose "$APP"
+echo "▸ Re-signing ad-hoc (deep, so bundled frameworks are covered)"
+codesign --force --deep --sign - --options runtime "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
-# Prove the ONLY egress entitlement present is network.client (Sparkle) — never network.server.
-if codesign -d --entitlements - "$APP" 2>/dev/null | grep -q 'network.server'; then
-  echo "✗ network.server entitlement present — aborting (golden rule 1)"; exit 1
+
+# Prove the golden-rule-1 guarantee holds in the shipped binary: no network entitlement at all.
+if codesign -d --entitlements - "$APP" 2>/dev/null | grep -q 'network'; then
+  echo "✗ a network entitlement is present — aborting (golden rule 1)"; exit 1
 fi
 
-# Re-zip the stapled app for delivery, then hand off to Sparkle's appcast generator.
+echo "▸ Zipping for release"
 ditto -c -k --keepParent "$APP" "$ZIP"
-echo "✓ Notarized, stapled build at: $ZIP"
+SHA="$(shasum -a 256 "$ZIP" | cut -d' ' -f1)"
+
 echo
-echo "Next (appcast — RELEASE.md §5): put $ZIP in your updates dir and run Sparkle's"
-echo "  ./bin/generate_appcast <updates-dir>"
-echo "which signs each entry with your EdDSA private key (in the keychain). Publish the resulting"
-echo "appcast.xml + zip to the SUFeedURL host. Keep the previous build+entry for rollback (§7)."
+echo "✓ $ZIP"
+echo "  sha256: $SHA"
+echo "  Attach the zip to a GitHub Release, then update Casks/doppel.rb (sha256 + version)."
+echo "  (The release.yml workflow does this automatically on a v* tag.)"
