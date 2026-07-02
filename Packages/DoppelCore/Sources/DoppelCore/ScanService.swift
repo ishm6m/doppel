@@ -47,8 +47,13 @@ public final class ScanService {
     /// if history needs them.
     public private(set) var skipped: [SkippedFile] = []
 
-    /// Source roots of the current scan, indexed by `FileRecord.bookmarkID`, for path reconstruction.
-    private var rootURLs: [URL] = []
+    /// Source root URLs of the current scan, keyed by the real `source_bookmark.id` that files carry in
+    /// `FileRecord.bookmarkID` after persistence, for path reconstruction.
+    private var rootURLByID: [Int64: URL] = [:]
+    /// Real source_bookmark ids for the current scan, in root order. The engine emits a 0-based root
+    /// index in `bookmarkID`; we translate index → this id before persisting so the FK to source_bookmark
+    /// holds. Empty in tests, where index is used as-is.
+    private var currentRootBookmarkIDs: [Int64] = []
     /// Roots we hold security-scoped access to. Kept open past scan end so the results can be acted on
     /// (e.g. trashed); released when the next scan starts. ponytail: not released on deinit — the OS
     /// reclaims at process exit; persist bookmarks (T4.2) when access must survive relaunch.
@@ -176,7 +181,11 @@ public final class ScanService {
         for url in scopedRoots {
             url.stopAccessingSecurityScopedResource()
         }
-        rootURLs = request.roots
+        currentRootBookmarkIDs = rootBookmarkIDs
+        rootURLByID = [:]
+        for (i, url) in request.roots.enumerated() {
+            rootURLByID[sourceID(forRootIndex: i)] = url
+        }
         scopedRoots = request.roots.filter { $0.startAccessingSecurityScopedResource() }
         groups = []
         membersByID = [:]
@@ -250,9 +259,11 @@ public final class ScanService {
         }
         scopedRoots = []
         if let session = sessions.first(where: { $0.id == id }) {
-            // Same index→source order scanSources used, so FileRecord.bookmarkID still aligns.
-            rootURLs = session.rootBookmarkIDs.map { sid in
-                sources.first { $0.id == sid }?.url ?? URL(fileURLWithPath: "/")
+            // Persisted files carry the real source_bookmark.id in bookmarkID; key roots by that id.
+            currentRootBookmarkIDs = session.rootBookmarkIDs
+            rootURLByID = [:]
+            for sid in session.rootBookmarkIDs {
+                rootURLByID[sid] = sources.first { $0.id == sid }?.url ?? URL(fileURLWithPath: "/")
             }
         }
         groups = saved
@@ -267,24 +278,36 @@ public final class ScanService {
     /// duplicates" (F7/F14), in which case it's dropped before surfacing so it doesn't recur.
     private func persistFoundGroup(_ group: DuplicateGroup, members: [FileRecord], sessionID: Int64) async throws {
         if Self.isFullyIgnored(group, by: ignoredPairs) { return }
+        // The engine stamps bookmarkID with a 0-based root index; translate it to the real
+        // source_bookmark.id so file_record's FK holds (and path reconstruction stays keyed by that id).
+        let mapped = members.map { file -> FileRecord in
+            var f = file
+            f.bookmarkID = sourceID(forRootIndex: Int(file.bookmarkID))
+            return f
+        }
         // ponytail: persist the group's members + the group. We do NOT persist a full file inventory —
         // the engine only emits grouped/skipped files, which is all the results UI needs.
-        try await store.upsertFiles(members)
+        try await store.upsertFiles(mapped)
         // ponytail: edges:[] — groupFound carries no MatchEdges; the compare view (F8) reads text live
         // rather than stored edges. Surface with the store-assigned id (the engine emits id 0) so the
         // list has stable identities and "Ignore group" can target this group.
-        let savedID = try await store.saveGroup(group, members: members.map(\.id), edges: [], sessionID: sessionID)
+        let savedID = try await store.saveGroup(group, members: mapped.map(\.id), edges: [], sessionID: sessionID)
         groups.append(group.withID(savedID))
-        for member in members {
+        for member in mapped {
             membersByID[member.id] = member
         }
     }
 
+    /// Real source_bookmark.id for a 0-based root index. Falls back to the index itself when no ids were
+    /// supplied (tests), so the in-memory store — which enforces no FK — keeps working unchanged.
+    private func sourceID(forRootIndex i: Int) -> Int64 {
+        currentRootBookmarkIDs.indices.contains(i) ? currentRootBookmarkIDs[i] : Int64(i)
+    }
+
     /// On-disk URL for a member file, rebuilt from its source root + relative path.
     public func absoluteURL(for file: FileRecord) -> URL? {
-        let idx = Int(file.bookmarkID)
-        guard rootURLs.indices.contains(idx) else { return nil }
-        return rootURLs[idx].appendingPathComponent(file.relativePath)
+        guard let root = rootURLByID[file.bookmarkID] else { return nil }
+        return root.appendingPathComponent(file.relativePath)
     }
 
     /// Word-level diff of two member files for the compare view (F8 — "why did these match?"). Reads
