@@ -2,8 +2,8 @@
 # (github.com/ishm6m/homebrew-doppel) at it so users can `brew install ishm6m/doppel/doppel`
 # and `brew upgrade`. The release workflow prints the new version + sha256 to bump on each release.
 cask "doppel" do
-  version "0.1.0"
-  sha256 "1797a39653f0a5c0411a8bf3cc211ed55b1f3e1856759e29e324df5a1605d073"
+  version "0.1.1"
+  sha256 "b0d1bc8413539b10977a0e5293b100c38c5fe79595cbeb718c5848e0b097f577"
 
   url "https://github.com/ishm6m/doppel/releases/download/v#{version}/Doppel.zip"
   name "Doppel"
