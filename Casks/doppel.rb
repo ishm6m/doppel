@@ -3,15 +3,14 @@
 # and `brew upgrade`. The release workflow prints the new version + sha256 to bump on each release.
 cask "doppel" do
   version "0.1.0"
-  # ponytail: placeholder until the first tagged release; release.sh / release.yml print the real one.
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "1797a39653f0a5c0411a8bf3cc211ed55b1f3e1856759e29e324df5a1605d073"
 
   url "https://github.com/ishm6m/doppel/releases/download/v#{version}/Doppel.zip"
   name "Doppel"
   desc "100% offline duplicate & near-duplicate file finder"
   homepage "https://github.com/ishm6m/doppel"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
   app "Doppel.app"
 
   caveats <<~EOS
