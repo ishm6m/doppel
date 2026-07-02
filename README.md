@@ -2,126 +2,123 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="doppel_dark_logo.png">
     <source media="(prefers-color-scheme: light)" srcset="doppel_light_logo.png">
-    <img alt="Doppel" src="doppel_light_logo.png" width="140" height="140">
+    <img alt="Doppel" src="doppel_light_logo.png" width="160" height="160">
   </picture>
 </p>
 
-<h1 align="center">Doppel</h1>
+# Doppel
+
+> Find duplicate **and near-duplicate** files by what they *contain*, not just their name and size. 100% offline. Open source.
 
 <p align="center">
-  <b>The duplicate finder that actually reads your files.</b><br>
-  Finds duplicates <i>and near-duplicates</i> by what they contain — not just name and size.<br>
-  100% offline. Nothing ever leaves your Mac.
+  <!-- Placeholder — replace docs/assets/screenshot.png with a real product shot or demo GIF. -->
+  <img src="docs/assets/screenshot.png" alt="Doppel screenshot" width="720">
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/platform-macOS%2014%2B-black?logo=apple" alt="macOS 14+">
-  <img src="https://img.shields.io/badge/100%25-offline-2ea44f" alt="100% offline">
-  <img src="https://img.shields.io/badge/Swift-6-orange?logo=swift&logoColor=white" alt="Swift 6">
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
-  <img src="https://img.shields.io/github/stars/ishm6m/doppel?style=social" alt="Stars">
-</p>
+> **Purpose:** Orient any human (or Claude Code) landing in this repo for the first time.
+> **Scope:** What Doppel is, how to set it up, and where to go next.
+> **Dependencies:** None.
 
 ---
 
-## Why this exists
+## What it does
 
-Every duplicate finder I tried compares **filenames and byte sizes**. That misses the thing I actually
-care about: *"these two files are the same contract, just with a different date."* Same content, different
-bytes — invisible to a normal deduper.
+Doppel reads the **content** of your images, PDFs, and text/Office documents and finds files that are the same or nearly the same — even when filenames, sizes, and dates differ. The headline use case:
 
-So I built Doppel. It reads the **content** of your images, PDFs, and text/Office docs and groups files
-that are the same or nearly the same, even when the name, size, and date all differ.
+> *"These two files are the same contract with different dates."*
 
-And because it's your files, **none of it touches a network.** Ever. No accounts, no cloud, no telemetry.
-It's the whole reason I didn't just make a web app.
+It does this through a **cost-ordered cascade**: cheap deterministic checks run first (exact hash, perceptual hash, near-duplicate text fingerprinting), and expensive on-device ML embeddings run **only** on the small set of candidates that survive. Nothing ever leaves your Mac.
 
-## What makes it different
+### Principles
+- **Offline by design.** No file content, names, paths, hashes, or embeddings ever touch a network.
+- **Reversible by design.** Files are moved to Trash, never destroyed. Everything is undoable.
+- **Explainable by design.** Every match shows *why* and *how confident*.
 
-- 🧠 **Content-aware.** Catches the same doc saved twice, renamed, or re-exported with a tweaked date.
-- 🔒 **Truly offline.** No file, name, path, hash, or embedding ever leaves the machine. The app opens
-  **zero** network connections — updates come through Homebrew, out of process.
-- ♻️ **Never destroys anything.** Files go to the Trash, never `rm`. Everything is undoable, and *you*
-  confirm every deletion — Doppel only ever suggests.
-- 💡 **Explains itself.** Every match tells you *why* it's a match and how confident it is. No black box.
-- ⚡ **Fast by design.** Cheap checks run first; the expensive on-device ML only touches the handful of
-  files that survive.
-
-## Install
-
-> Doppel is free, open source, and built without a paid Apple Developer account — so it's **ad-hoc signed,
-> not notarized.** macOS will ask you to approve it once on first launch. Totally normal for indie Mac
-> apps, and it changes nothing about the privacy guarantees.
-
-**Homebrew** (recommended — you get updates via `brew upgrade`):
-
-```bash
-brew install --cask --no-quarantine ishm6m/doppel/doppel
-```
-
-<sub>`--no-quarantine` skips the Gatekeeper prompt. Prefer not to? Drop it, then right-click ▸ Open once.</sub>
-
-**Or grab the app directly:**
-
-1. Download `Doppel.zip` from the [latest release](https://github.com/ishm6m/doppel/releases/latest), unzip, drag `Doppel.app` to `/Applications`.
-2. First launch: **right-click ▸ Open** and confirm (or `xattr -dr com.apple.quarantine /Applications/Doppel.app`). One time only.
-
-There is **no in-app updater** — that's deliberate. It's how the app can promise zero network calls (see [`SECURITY.md`](docs/SECURITY.md)).
-
-## How it works
-
-Doppel runs a **cost-ordered cascade** — cheap, deterministic stages first, expensive ML last, and only
-on what's left:
-
-```
-Files ─▶ Stage 0  group by size / metadata
-      ─▶ Stage 1  SHA-256          → exact duplicates          (free)
-      ─▶ Stage 2  pHash / MinHash  → near-duplicate candidates (cheap)
-      ─▶ Stage 3  ML embeddings    → semantic matches, on-device only on survivors (expensive)
-      ─▶ cluster ─▶ explain ─▶ you review and Trash in one click
-```
-
-Full write-up in [`ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+---
 
 ## Status
 
-🚧 **Early — MVP in active development.** Documents first (**text + PDF**), images in V2.
-It's built in the open; expect rough edges and follow along. Roadmap: [`ROADMAP.md`](docs/ROADMAP.md).
+MVP in development. Scope: **documents (text + PDF) first**, images in V2. See `ROADMAP.md`.
 
-## Build from source
+---
+
+## Requirements
+
+- macOS 14.0 (Sonoma) or later
+- Apple Silicon recommended (Intel supported with reduced ML performance)
+- Xcode 16+ and Swift 6 toolchain to build from source
+
+## Install
+
+Doppel is free and open source. Because it's built without a paid Apple Developer account, the release
+is **ad-hoc signed, not notarized** — so macOS Gatekeeper will ask you to approve it once on first launch.
+That's normal for open-source Mac apps and does not affect the privacy guarantees.
+
+**Homebrew (recommended — handles updates via `brew upgrade`):**
+```bash
+brew install --cask --no-quarantine ishm6m/doppel/doppel
+```
+(`--no-quarantine` skips the Gatekeeper prompt. Omit it and instead right-click ▸ Open once if you prefer.)
+
+**Or download the app directly:**
+1. Grab `Doppel.zip` from the [latest release](https://github.com/ishm6m/doppel/releases/latest), unzip, move `Doppel.app` to `/Applications`.
+2. First launch: **right-click Doppel.app ▸ Open** and confirm (or run `xattr -dr com.apple.quarantine /Applications/Doppel.app`). You only do this once.
+
+Updates ship through Homebrew — there is **no in-app updater**, so the app makes zero network connections (see `SECURITY.md`).
+
+## Quick start (build from source)
 
 ```bash
 git clone https://github.com/ishm6m/doppel.git && cd doppel
 brew install xcodegen && xcodegen generate
 xcodebuild -scheme Doppel -configuration Debug build
-open ./build/Debug/Doppel.app        # or just open it in Xcode
+open ./build/Debug/Doppel.app   # or run from Xcode
 ```
 
-Tests and linters:
+Run tests and linters:
 
 ```bash
 swiftformat . && swiftlint --strict
 xcodebuild test -scheme Doppel -destination 'platform=macOS'
 ```
 
-**Requirements:** macOS 14 (Sonoma)+, Xcode 16 + Swift 6 toolchain. Apple Silicon recommended (Intel works,
-slower ML).
+## How it works (30-second version)
 
-## Contributing
+```
+Files ─▶ Stage 0  size/metadata grouping
+      ─▶ Stage 1  SHA-256        → exact duplicates (free)
+      ─▶ Stage 2  pHash / MinHash → near-duplicate candidate clusters (cheap)
+      ─▶ Stage 3  embeddings      → semantic matches on survivors only (expensive, on-device)
+      ─▶ Cluster, explain, present → you review and Trash with one click
+```
 
-Contributions are genuinely welcome — this is a solo project and help makes it better. Good first steps:
+Full detail in `ARCHITECTURE.md`.
 
-- ⭐ **Star the repo** if the idea resonates. It's the #1 thing that keeps an indie project going.
-- 🐛 Found a bug or have an idea? [Open an issue](https://github.com/ishm6m/doppel/issues).
-- 🔧 Want to hack on it? Read [`CONTRIBUTING.md`](CONTRIBUTING.md), then `CLAUDE.md` for the house rules
-  (the two golden ones: **never touch the network, never destroy a file**).
+## Repository map
 
-New to the codebase? Read in this order: [`PRD`](docs/PRD.md) → [`ARCHITECTURE`](docs/ARCHITECTURE.md) →
-[`DATA_MODEL`](docs/DATA_MODEL.md) → [`FEATURES`](docs/FEATURES.md) → [`TASKS`](docs/TASKS.md). Everything
-lives in [`docs/`](docs/).
+| Path | What |
+|---|---|
+| `Doppel/` | SwiftUI app target |
+| `Packages/DetectionEngine/` | The cascade. Pure Swift, no UI. |
+| `Packages/IndexStore/` | SQLite (GRDB) persistence |
+| `Packages/DoppelKit/` | Shared models/utilities |
+| `Tools/CorpusGen/` | Synthetic test-corpus generator |
+| `*.md` (root `docs/`) | This documentation package |
+
+## Documentation index
+
+Start with `CLAUDE.md`, then `PRD.md` → `ARCHITECTURE.md` → `DATA_MODEL.md` → `FEATURES.md` → `TASKS.md`. Topic docs: `UI_SPEC`, `DESIGN_SYSTEM`, `COMPONENTS`, `STATE_MANAGEMENT`, `API`, `USER_FLOWS`, `ERROR_HANDLING`, `PERFORMANCE`, `TESTING`, `SECURITY`, `ACCESSIBILITY`, `RELEASE`.
 
 ## License
 
-[MIT](LICENSE) — use it, fork it, ship it. Distribution is via GitHub Releases + Homebrew.
+[MIT](LICENSE). Fully open source — use, modify, and redistribute freely. Distribution is via GitHub
+Releases + Homebrew; see `RELEASE.md` → Distribution.
 
-<p align="center"><sub>Built on Apple Silicon, for people who'd rather their files stayed theirs.</sub></p>
+## Open Questions
+- _(none currently)_
+
+## Future Improvements
+- CLI distribution via Homebrew.
+
+## Related Documents
+- All of `docs/`.
