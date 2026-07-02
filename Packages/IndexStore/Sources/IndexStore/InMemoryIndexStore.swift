@@ -44,7 +44,9 @@ public actor InMemoryIndexStore: IndexStoring {
     public func removeSource(id: Int64) async throws {
         sourcesByID[id] = nil
         let removed = Set(filesByID.values.filter { $0.bookmarkID == id }.map(\.id))
-        for fid in removed { filesByID[fid] = nil }
+        for fid in removed {
+            filesByID[fid] = nil
+        }
         // Mirror GRDB: a group whose keeper lived in this source is dropped (keeper FK has no cascade).
         for (gid, g) in groupsByID where removed.contains(g.group.keeperFileID) {
             groupsByID[gid] = nil
