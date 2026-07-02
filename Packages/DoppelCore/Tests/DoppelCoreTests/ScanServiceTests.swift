@@ -298,6 +298,32 @@ final class ScanServiceTests: XCTestCase {
         XCTAssertEqual(status3, .indexed)
     }
 
+    /// Regression (real SQLite): the engine stamps `bookmarkID` with a 0-based root index, but the DB's
+    /// file_record.bookmark_id has an FK to source_bookmark.id. Persisting the index verbatim threw
+    /// "FOREIGN KEY constraint failed" and killed the scan. ScanService must translate index → real
+    /// source id before persisting. Uses GRDBIndexStore (FKs enforced), not the in-memory fake.
+    func testScanPersistsRealSourceIDNotRootIndex() async throws {
+        let store = try GRDBIndexStore(inMemory: true)
+        // Real source ids autoincrement from 1, so they never equal the engine's 0-based index.
+        let sid = try await store.addSource(SourceBookmark(id: 0, bookmarkData: Data(), displayPath: "/tmp"))
+        XCTAssertNotEqual(sid, 0)
+
+        let group = DuplicateGroup(
+            id: 0, matchType: .exact, confidence: 1.0,
+            explanation: "Identical file contents", keeperFileID: 1, memberFileIDs: [1, 2]
+        )
+        let svc = ScanService(coordinator: StubCoordinator(events: [
+            .groupFound(group, members: [file(1, "a.txt"), file(2, "b.txt")]),
+            .finished(summary: ScanSummary(filesDiscovered: 2, groupsFound: 1))
+        ]), store: store)
+
+        // Before the fix this threw on the first upsert; now it completes.
+        try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]), rootBookmarkIDs: [sid])
+
+        let saved = try await store.file(id: 1)
+        XCTAssertEqual(saved?.bookmarkID, sid, "persisted with the real source id, not the root index")
+    }
+
     /// Source folders are persisted on add and re-resolved by a fresh service from the same store,
     /// so folder access survives relaunch (T4.2). Identity bookmark codecs stand in for the
     /// security-scoped APIs, which need the app sandbox that `swift test` lacks.
