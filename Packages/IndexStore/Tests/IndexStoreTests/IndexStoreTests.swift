@@ -5,12 +5,13 @@ import XCTest
 /// Shared behavioral contract: every assertion runs against BOTH IndexStoring implementations
 /// (InMemoryIndexStore and GRDBIndexStore), proving they are observably equivalent. File records are
 /// always parented to a real source so the contract is valid under GRDB's enforced foreign keys.
+/// File ids are store-assigned (identity = source + path), so assertions use the ids upsert returns.
 private func assertStoreBehavior(_ store: any IndexStoring) async throws {
     // Source round-trip + cascade delete
     let sid = try await store.addSource(SourceBookmark(id: 0, bookmarkData: Data(), displayPath: "/tmp"))
-    try await store.upsertFiles([
+    let cascadeFile = try await store.upsertFiles([
         FileRecord(
-            id: 1,
+            id: 0,
             bookmarkID: sid,
             relativePath: "a.txt",
             displayName: "a.txt",
@@ -18,38 +19,40 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
             mtime: .now,
             typeScope: .document
         )
-    ])
+    ])[0]
     let sourceCount = try await store.sources().count
     XCTAssertEqual(sourceCount, 1)
     try await store.removeSource(id: sid)
-    let cascaded = try await store.file(id: 1)
+    let cascaded = try await store.file(id: cascadeFile.id)
     XCTAssertNil(cascaded) // cascade removed the file
 
     try await assertRemoveSourceDropsKeeperGroup(store)
+    try await assertUpsertKeysByPathNotEngineID(store)
 
     // A persistent source to parent the remaining file-based assertions.
     let src = try await store.addSource(SourceBookmark(id: 0, bookmarkData: Data(), displayPath: "/docs"))
 
     // Unchanged detection (signature = size + mtime + fileID)
     let mtime = Date(timeIntervalSince1970: 100)
-    let f = FileRecord(
-        id: 11,
-        bookmarkID: src,
-        relativePath: "a",
-        displayName: "a",
-        sizeBytes: 42,
-        mtime: mtime,
-        fileID: 7,
-        typeScope: .document
-    )
-    try await store.upsertFiles([f])
+    let f = try await store.upsertFiles([
+        FileRecord(
+            id: 0,
+            bookmarkID: src,
+            relativePath: "a",
+            displayName: "a",
+            sizeBytes: 42,
+            mtime: mtime,
+            fileID: 7,
+            typeScope: .document
+        )
+    ])[0]
     let unchanged = try await store.unchangedFileIDs(matching: [f.signature])
-    XCTAssertTrue(unchanged.contains(11))
+    XCTAssertTrue(unchanged.contains(f.id))
 
     // Mark deleted / restore
-    try await store.upsertFiles([
+    let del = try await store.upsertFiles([
         FileRecord(
-            id: 21,
+            id: 0,
             bookmarkID: src,
             relativePath: "del",
             displayName: "del",
@@ -57,12 +60,12 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
             mtime: .now,
             typeScope: .document
         )
-    ])
-    try await store.markDeleted(ids: [21])
-    let deleted = try await store.file(id: 21)
+    ])[0]
+    try await store.markDeleted(ids: [del.id])
+    let deleted = try await store.file(id: del.id)
     XCTAssertEqual(deleted?.status, .skipped)
-    try await store.restore(ids: [21])
-    let restored = try await store.file(id: 21)
+    try await store.restore(ids: [del.id])
+    let restored = try await store.file(id: del.id)
     XCTAssertEqual(restored?.status, .indexed)
 
     // Embedding invalidation + float32 BLOB round-trip
@@ -85,7 +88,7 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
     XCTAssertEqual(session?.scopes, [.document, .image])
     XCTAssertEqual(session?.filesDiscovered, 5)
 
-    // Group save + members + keeper + ignore (files 11 & 21 exist under src, satisfying FKs).
+    // Group save + members + keeper + ignore (files f & del exist under src, satisfying FKs).
     // Groups are tagged with the owning session (ssid); a different session must not see them.
     let gid = try await store.saveGroup(
         DuplicateGroup(
@@ -93,51 +96,80 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
             matchType: .exact,
             confidence: 1.0,
             explanation: "identical",
-            keeperFileID: 11,
-            memberFileIDs: [11, 21]
+            keeperFileID: f.id,
+            memberFileIDs: [f.id, del.id]
         ),
-        members: [11, 21],
-        edges: [MatchEdge(groupID: 0, fileA: 11, fileB: 21, matchType: .exact, score: 1.0, reasonSummary: "sha256")],
+        members: [f.id, del.id],
+        edges: [MatchEdge(groupID: 0, fileA: f.id, fileB: del.id, matchType: .exact, score: 1.0, reasonSummary: "sha256")],
         sessionID: ssid
     )
     let savedGroup = try await store.groups(sessionID: ssid).first { $0.id == gid }
-    XCTAssertEqual(savedGroup?.memberFileIDs, [11, 21])
+    XCTAssertEqual(savedGroup?.memberFileIDs, [f.id, del.id].sorted())
     let otherSession = try await store.createSession(ScanSession(id: 0, rootBookmarkIDs: [], scopes: [.document]))
     let isolated = try await store.groups(sessionID: otherSession)
     XCTAssertTrue(isolated.isEmpty, "groups are scoped to their owning session")
-    try await store.setKeeper(groupID: gid, fileID: 21)
+    try await store.setKeeper(groupID: gid, fileID: del.id)
     let keptGroup = try await store.groups(sessionID: ssid).first { $0.id == gid }
-    XCTAssertEqual(keptGroup?.keeperFileID, 21)
+    XCTAssertEqual(keptGroup?.keeperFileID, del.id)
     try await store.ignoreGroup(gid)
     let ignoredGroup = try await store.groups(sessionID: ssid).first { $0.id == gid }
     XCTAssertEqual(ignoredGroup?.ignored, true)
 
     // Ignore pairs (normalized so (a,b) == (b,a))
-    try await store.ignorePair(21, 11)
+    try await store.ignorePair(del.id, f.id)
     let ignoredPairs = try await store.ignoredPairs()
-    XCTAssertTrue(ignoredPairs.contains(Pair(11, 21)))
+    XCTAssertTrue(ignoredPairs.contains(Pair(f.id, del.id)))
 }
 
 /// Regression: removing a source whose file is a group's keeper must not trip the keeper FK
 /// (duplicate_group.keeper_file_id has no ON DELETE cascade). Throws on GRDB before the fix.
 private func assertRemoveSourceDropsKeeperGroup(_ store: any IndexStoring) async throws {
     let ksid = try await store.addSource(SourceBookmark(id: 0, bookmarkData: Data(), displayPath: "/k"))
-    try await store.upsertFiles([
-        FileRecord(id: 101, bookmarkID: ksid, relativePath: "k1", displayName: "k1", sizeBytes: 5, mtime: .now, typeScope: .document),
-        FileRecord(id: 102, bookmarkID: ksid, relativePath: "k2", displayName: "k2", sizeBytes: 5, mtime: .now, typeScope: .document)
+    let files = try await store.upsertFiles([
+        FileRecord(id: 0, bookmarkID: ksid, relativePath: "k1", displayName: "k1", sizeBytes: 5, mtime: .now, typeScope: .document),
+        FileRecord(id: 0, bookmarkID: ksid, relativePath: "k2", displayName: "k2", sizeBytes: 5, mtime: .now, typeScope: .document)
     ])
+    let ids = files.map(\.id)
     let ksess = try await store.createSession(ScanSession(id: 0, rootBookmarkIDs: [ksid], scopes: [.document]))
     let kgid = try await store.saveGroup(
-        DuplicateGroup(id: 0, matchType: .exact, confidence: 1.0, explanation: "id", keeperFileID: 101, memberFileIDs: [101, 102]),
-        members: [101, 102],
+        DuplicateGroup(id: 0, matchType: .exact, confidence: 1.0, explanation: "id", keeperFileID: ids[0], memberFileIDs: ids),
+        members: ids,
         edges: [],
         sessionID: ksess
     )
     try await store.removeSource(id: ksid) // must not throw
     let keeperGroup = try await store.groups(sessionID: ksess).first { $0.id == kgid }
     XCTAssertNil(keeperGroup, "keeper's group is dropped")
-    let keeperFile = try await store.file(id: 101)
+    let keeperFile = try await store.file(id: ids[0])
     XCTAssertNil(keeperFile)
+}
+
+/// Regression: file identity is (source, path), NOT the engine's per-scan id. The engine renumbers
+/// files every scan, so a rescan re-presents the same paths under different ids; upserting by id made
+/// that trip "UNIQUE constraint failed: file_record.bookmark_id, file_record.relative_path"
+/// (SQLite error 19) and kill the scan. Re-upserting the same paths — in any order, with any incoming
+/// ids — must update in place and keep returning the same durable row ids.
+private func assertUpsertKeysByPathNotEngineID(_ store: any IndexStoring) async throws {
+    let sid = try await store.addSource(SourceBookmark(id: 0, bookmarkData: Data(), displayPath: "/r"))
+    func rec(_ engineID: Int64, _ path: String, size: Int64) -> FileRecord {
+        FileRecord(
+            id: engineID,
+            bookmarkID: sid,
+            relativePath: path,
+            displayName: path,
+            sizeBytes: size,
+            mtime: .now,
+            typeScope: .document
+        )
+    }
+    let first = try await store.upsertFiles([rec(1, "x", size: 1), rec(2, "y", size: 2)])
+    // Rescan: same paths, renumbered + reordered engine ids. Must not throw.
+    let second = try await store.upsertFiles([rec(1, "y", size: 20), rec(2, "x", size: 10), rec(3, "z", size: 3)])
+    XCTAssertEqual(second[0].id, first[1].id, "same path keeps its durable row id across rescans")
+    XCTAssertEqual(second[1].id, first[0].id)
+    XCTAssertFalse(first.map(\.id).contains(second[2].id), "new path gets a fresh id")
+    let updated = try await store.file(id: first[0].id)
+    XCTAssertEqual(updated?.sizeBytes, 10, "rescan updated the existing row in place")
 }
 
 final class InMemoryIndexStoreTests: XCTestCase {

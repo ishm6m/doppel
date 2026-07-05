@@ -277,7 +277,6 @@ public final class ScanService {
     /// Persists and surfaces one found group, unless the user already marked this exact set "not
     /// duplicates" (F7/F14), in which case it's dropped before surfacing so it doesn't recur.
     private func persistFoundGroup(_ group: DuplicateGroup, members: [FileRecord], sessionID: Int64) async throws {
-        if Self.isFullyIgnored(group, by: ignoredPairs) { return }
         // The engine stamps bookmarkID with a 0-based root index; translate it to the real
         // source_bookmark.id so file_record's FK holds (and path reconstruction stays keyed by that id).
         let mapped = members.map { file -> FileRecord in
@@ -287,13 +286,25 @@ public final class ScanService {
         }
         // ponytail: persist the group's members + the group. We do NOT persist a full file inventory —
         // the engine only emits grouped/skipped files, which is all the results UI needs.
-        try await store.upsertFiles(mapped)
+        // The store keys files by (source, path) and assigns durable row ids; the engine's per-scan
+        // ids are ephemeral. Rewrite the group's member/keeper ids into store ids so they reference
+        // real rows (and stay stable across rescans — which also makes the ignore check below stick).
+        let persisted = try await store.upsertFiles(mapped)
+        var storeID: [Int64: Int64] = [:]
+        for (engine, saved) in zip(members, persisted) {
+            storeID[engine.id] = saved.id
+        }
+        var remapped = group
+        remapped.memberFileIDs = group.memberFileIDs.compactMap { storeID[$0] }
+        guard let firstMember = remapped.memberFileIDs.first else { return }
+        remapped.keeperFileID = storeID[group.keeperFileID] ?? firstMember
+        if Self.isFullyIgnored(remapped, by: ignoredPairs) { return }
         // ponytail: edges:[] — groupFound carries no MatchEdges; the compare view (F8) reads text live
         // rather than stored edges. Surface with the store-assigned id (the engine emits id 0) so the
         // list has stable identities and "Ignore group" can target this group.
-        let savedID = try await store.saveGroup(group, members: mapped.map(\.id), edges: [], sessionID: sessionID)
-        groups.append(group.withID(savedID))
-        for member in mapped {
+        let savedID = try await store.saveGroup(remapped, members: remapped.memberFileIDs, edges: [], sessionID: sessionID)
+        groups.append(remapped.withID(savedID))
+        for member in persisted {
             membersByID[member.id] = member
         }
     }
@@ -391,8 +402,8 @@ public final class ScanService {
 
     /// Marks a group "not duplicates" (F7/F14): persists every member pair as ignored and removes the
     /// group from the live results. On a later scan, a group whose every internal pair is ignored is
-    /// dropped before it surfaces, so it won't recur. ponytail: keyed by `FileRecord.id`, which is
-    /// stable only while enumeration order is — a content-hash key is the robust cross-rescan upgrade.
+    /// dropped before it surfaces, so it won't recur. Keyed by the store's `FileRecord.id`, which is
+    /// durable per (source, path) — a rescan re-finds the same ids, so ignores stick across scans.
     public func ignore(_ group: DuplicateGroup) async throws {
         for pair in Self.memberPairs(group.memberFileIDs) {
             try await store.ignorePair(pair.a, pair.b)

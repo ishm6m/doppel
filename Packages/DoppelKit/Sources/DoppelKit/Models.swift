@@ -55,7 +55,9 @@ public struct FileSignature: Sendable, Hashable {
 // MARK: - Core records
 
 public struct FileRecord: Identifiable, Sendable, Hashable {
-    public let id: Int64
+    /// Mutable: the engine stamps a per-scan id; the store replaces it with the durable row id on
+    /// upsert (identity in the store is (bookmarkID, relativePath), not this).
+    public var id: Int64
     public var bookmarkID: Int64
     public var relativePath: String
     public var displayName: String
