@@ -10,7 +10,10 @@ public protocol IndexStoring: Sendable {
     func removeSource(id: Int64) async throws
 
     // Files
-    func upsertFiles(_ files: [FileRecord]) async throws
+    /// Inserts or updates by (bookmarkID, relativePath) — the durable file identity. The incoming
+    /// `id` (a per-scan engine id) is ignored; the returned records, in input order, carry the
+    /// store-assigned row ids that groups/members must reference.
+    func upsertFiles(_ files: [FileRecord]) async throws -> [FileRecord]
     func unchangedFileIDs(matching sigs: [FileSignature]) async throws -> Set<Int64>
     func file(id: Int64) async throws -> FileRecord?
     func markDeleted(ids: [Int64]) async throws

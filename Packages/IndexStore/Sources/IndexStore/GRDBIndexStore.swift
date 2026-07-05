@@ -159,17 +159,19 @@ public actor GRDBIndexStore: IndexStoring {
     }
 
     /// Files
-    public func upsertFiles(_ files: [FileRecord]) async throws {
+    public func upsertFiles(_ files: [FileRecord]) async throws -> [FileRecord] {
+        // Conflict target is UNIQUE(bookmark_id, relative_path) — the durable identity — NOT the id.
+        // The engine renumbers files every scan, so upserting by id made a rescan collide with the
+        // path uniqueness constraint (SQLite error 19) whenever enumeration order shifted.
         try await dbQueue.write { db in
-            for f in files {
+            try files.map { f in
                 try db.execute(
                     sql: """
                     INSERT INTO file_record
-                      (id, bookmark_id, relative_path, display_name, size_bytes, mtime, file_id,
+                      (bookmark_id, relative_path, display_name, size_bytes, mtime, file_id,
                        type_scope, content_kind, sha256, minhash, phash, embedding_id, status, issue_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                      bookmark_id = excluded.bookmark_id, relative_path = excluded.relative_path,
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(bookmark_id, relative_path) DO UPDATE SET
                       display_name = excluded.display_name, size_bytes = excluded.size_bytes,
                       mtime = excluded.mtime, file_id = excluded.file_id, type_scope = excluded.type_scope,
                       content_kind = excluded.content_kind, sha256 = excluded.sha256, minhash = excluded.minhash,
@@ -178,6 +180,14 @@ public actor GRDBIndexStore: IndexStoring {
                     """,
                     arguments: fileArguments(f)
                 )
+                guard let rowID = try Int64.fetchOne(
+                    db,
+                    sql: "SELECT id FROM file_record WHERE bookmark_id = ? AND relative_path = ?",
+                    arguments: [f.bookmarkID, f.relativePath]
+                ) else { throw StoreError.decode("upserted row not found") }
+                var saved = f
+                saved.id = rowID
+                return saved
             }
         }
     }
@@ -440,7 +450,7 @@ private func fileArguments(_ f: FileRecord) throws -> StatementArguments {
         return s
     }
     return [
-        f.id, f.bookmarkID, f.relativePath, f.displayName, f.sizeBytes, f.mtime.timeIntervalSince1970,
+        f.bookmarkID, f.relativePath, f.displayName, f.sizeBytes, f.mtime.timeIntervalSince1970,
         f.fileID.map { Int64(bitPattern: $0) }, f.typeScope.rawValue, f.contentKind.rawValue,
         f.sha256, f.minhash, f.phash.map { Int64(bitPattern: $0) }, f.embeddingID, f.status.rawValue, issueJSON
     ]

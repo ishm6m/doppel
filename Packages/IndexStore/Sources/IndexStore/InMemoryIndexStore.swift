@@ -54,9 +54,16 @@ public actor InMemoryIndexStore: IndexStoring {
     }
 
     /// Files
-    public func upsertFiles(_ files: [FileRecord]) async throws {
-        for f in files {
-            filesByID[f.id] = f
+    public func upsertFiles(_ files: [FileRecord]) async throws -> [FileRecord] {
+        // Mirror GRDB: identity is (bookmarkID, relativePath); the store assigns the id.
+        // ponytail: linear scan per file — fine at test/preview scale, index by path if it isn't.
+        files.map { f in
+            var saved = f
+            saved.id = filesByID.values
+                .first { $0.bookmarkID == f.bookmarkID && $0.relativePath == f.relativePath }?
+                .id ?? makeID()
+            filesByID[saved.id] = saved
+            return saved
         }
     }
 

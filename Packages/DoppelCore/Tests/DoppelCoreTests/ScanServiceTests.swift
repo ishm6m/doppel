@@ -50,14 +50,16 @@ final class ScanServiceTests: XCTestCase {
 
         let sessionID = try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]))
 
-        // Group persisted under the owning session, with its members.
+        // Group persisted under the owning session, with its members carrying store-assigned ids
+        // (identity = source + path; the engine's per-scan ids are rewritten on persist).
         let saved = try await store.groups(sessionID: sessionID)
         XCTAssertEqual(saved.count, 1)
-        XCTAssertEqual(saved.first?.memberFileIDs, [1, 2])
+        let memberIDs = try XCTUnwrap(saved.first?.memberFileIDs)
+        XCTAssertEqual(memberIDs.count, 2)
         XCTAssertEqual(saved.first?.explanation, "Identical file contents")
 
         // Member files persisted and queryable.
-        let savedFile = try await store.file(id: 1)
+        let savedFile = try await store.file(id: memberIDs[0])
         XCTAssertEqual(savedFile?.displayName, "a.txt")
 
         // Session finalized with the authoritative summary counts.
@@ -70,9 +72,9 @@ final class ScanServiceTests: XCTestCase {
         // Observable state mirrors what the UI would render.
         XCTAssertEqual(svc.groups.count, 1)
         XCTAssertEqual(svc.summary?.bytesReclaimable, 10)
-        // Member records retained for the results UI to render rows.
-        XCTAssertEqual(svc.membersByID[1]?.displayName, "a.txt")
-        XCTAssertEqual(svc.membersByID[2]?.displayName, "b.txt")
+        // Member records retained for the results UI to render rows, keyed by store ids.
+        XCTAssertEqual(svc.membersByID[memberIDs[0]]?.displayName, "a.txt")
+        XCTAssertEqual(svc.membersByID[memberIDs[1]]?.displayName, "b.txt")
     }
 
     /// The header counts (phase, processed/total) mirror the last progress event so the UI can show
@@ -153,9 +155,10 @@ final class ScanServiceTests: XCTestCase {
 
         try await reader.openSession(sessionID)
         XCTAssertEqual(reader.groups.count, 1)
-        XCTAssertEqual(reader.groups.first?.memberFileIDs, [1, 2])
-        XCTAssertEqual(reader.membersByID[1]?.displayName, "a.txt")
-        XCTAssertEqual(reader.membersByID[2]?.displayName, "b.txt")
+        let memberIDs = try XCTUnwrap(reader.groups.first?.memberFileIDs)
+        XCTAssertEqual(memberIDs.count, 2)
+        XCTAssertEqual(reader.membersByID[memberIDs[0]]?.displayName, "a.txt")
+        XCTAssertEqual(reader.membersByID[memberIDs[1]]?.displayName, "b.txt")
     }
 
     /// Ignoring a group (F7/F14) removes it from the live results, persists its member pairs, and a
@@ -180,7 +183,7 @@ final class ScanServiceTests: XCTestCase {
         try await svc.ignore(surfaced)
         XCTAssertTrue(svc.groups.isEmpty, "ignored group leaves the live results")
         let persisted = try await store.ignoredPairs()
-        XCTAssertTrue(persisted.contains(Pair(1, 2)))
+        XCTAssertTrue(persisted.contains(Pair(surfaced.memberFileIDs[0], surfaced.memberFileIDs[1])))
 
         // Re-scan finds the same pair again; it must not resurface.
         let rescan = ScanService(coordinator: StubCoordinator(events: events), store: store)
@@ -240,19 +243,20 @@ final class ScanServiceTests: XCTestCase {
         ]), store: store)
         try await svc.startScan(ScanRequest(roots: [tmp], scopes: [.document]))
 
-        let trashed = try await svc.trash([2])
-        XCTAssertEqual(trashed, [2])
+        let dupeID = try XCTUnwrap(svc.membersByID.first { $0.value.displayName == "b.txt" }?.key)
+        let trashed = try await svc.trash([dupeID])
+        XCTAssertEqual(trashed, [dupeID])
         XCTAssertTrue(fm.fileExists(atPath: keeper.path), "keeper stays")
         XCTAssertFalse(fm.fileExists(atPath: dupe.path), "non-keeper moved to Trash")
-        XCTAssertNil(svc.membersByID[2])
+        XCTAssertNil(svc.membersByID[dupeID])
         XCTAssertTrue(svc.groups.isEmpty, "singleton group removed")
 
         // Undo brings the trashed file back from the Trash and restores the live results.
         XCTAssertTrue(svc.canUndoTrash)
         let restored = try await svc.undoLastTrash()
-        XCTAssertEqual(restored, [2])
+        XCTAssertEqual(restored, [dupeID])
         XCTAssertTrue(fm.fileExists(atPath: dupe.path), "non-keeper moved back out of Trash")
-        XCTAssertEqual(svc.membersByID[2]?.displayName, "b.txt")
+        XCTAssertEqual(svc.membersByID[dupeID]?.displayName, "b.txt")
         XCTAssertEqual(svc.groups.count, 1, "group restored")
         XCTAssertFalse(svc.canUndoTrash, "undo consumed")
     }
@@ -286,16 +290,18 @@ final class ScanServiceTests: XCTestCase {
         // c.txt vanishes before we trash — trashItem will throw for it.
         try fm.removeItem(at: dupe2)
 
-        let trashed = try await svc.trash([2, 3])
-        XCTAssertEqual(trashed, [2], "only the reachable dupe is trashed")
+        let bID = try XCTUnwrap(svc.membersByID.first { $0.value.displayName == "b.txt" }?.key)
+        let cID = try XCTUnwrap(svc.membersByID.first { $0.value.displayName == "c.txt" }?.key)
+        let trashed = try await svc.trash([bID, cID])
+        XCTAssertEqual(trashed, [bID], "only the reachable dupe is trashed")
         XCTAssertFalse(fm.fileExists(atPath: dupe1.path), "b.txt went to Trash")
-        XCTAssertNil(svc.membersByID[2], "trashed file left the results")
-        XCTAssertNotNil(svc.membersByID[3], "the missing file stays visible (not silently dropped)")
-        // Index agrees: only id 2 is marked deleted (.skipped); the missing file is untouched.
-        let status2 = try await store.file(id: 2)?.status
-        let status3 = try await store.file(id: 3)?.status
-        XCTAssertEqual(status2, .skipped)
-        XCTAssertEqual(status3, .indexed)
+        XCTAssertNil(svc.membersByID[bID], "trashed file left the results")
+        XCTAssertNotNil(svc.membersByID[cID], "the missing file stays visible (not silently dropped)")
+        // Index agrees: only b.txt is marked deleted (.skipped); the missing file is untouched.
+        let statusB = try await store.file(id: bID)?.status
+        let statusC = try await store.file(id: cID)?.status
+        XCTAssertEqual(statusB, .skipped)
+        XCTAssertEqual(statusC, .indexed)
     }
 
     /// Regression (real SQLite): the engine stamps `bookmarkID` with a 0-based root index, but the DB's
@@ -320,8 +326,62 @@ final class ScanServiceTests: XCTestCase {
         // Before the fix this threw on the first upsert; now it completes.
         try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]), rootBookmarkIDs: [sid])
 
-        let saved = try await store.file(id: 1)
+        let memberID = try XCTUnwrap(svc.groups.first?.memberFileIDs.first)
+        let saved = try await store.file(id: memberID)
         XCTAssertEqual(saved?.bookmarkID, sid, "persisted with the real source id, not the root index")
+    }
+
+    /// Regression (real SQLite): the engine renumbers files 1…N every scan, so a rescan re-presents
+    /// the same paths under different engine ids. Upserting by id then threw "UNIQUE constraint
+    /// failed: file_record.bookmark_id, file_record.relative_path" (SQLite error 19) and killed the
+    /// scan. A rescan must complete, reuse each path's durable row id, and its group must reference
+    /// those rows.
+    func testRescanWithRenumberedEngineIDsSucceeds() async throws {
+        let store = try GRDBIndexStore(inMemory: true)
+        let sid = try await store.addSource(SourceBookmark(id: 0, bookmarkData: Data(), displayPath: "/tmp"))
+        func scan(_ svcEvents: [ScanEvent]) async throws -> ScanService {
+            let svc = ScanService(coordinator: StubCoordinator(events: svcEvents), store: store)
+            try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]), rootBookmarkIDs: [sid])
+            return svc
+        }
+
+        let first = try await scan([
+            .groupFound(
+                DuplicateGroup(
+                    id: 0,
+                    matchType: .exact,
+                    confidence: 1.0,
+                    explanation: "Identical file contents",
+                    keeperFileID: 1,
+                    memberFileIDs: [1, 2]
+                ),
+                members: [file(1, "a.txt"), file(2, "b.txt")]
+            ),
+            .finished(summary: ScanSummary(filesDiscovered: 2, groupsFound: 1))
+        ])
+        let firstIDs = try XCTUnwrap(first.groups.first?.memberFileIDs)
+
+        // Rescan: a new file shifted enumeration, so a.txt/b.txt arrive renumbered (2, 3).
+        // Before the fix this threw on the upsert; now the same paths keep their row ids.
+        let second = try await scan([
+            .groupFound(
+                DuplicateGroup(
+                    id: 0,
+                    matchType: .exact,
+                    confidence: 1.0,
+                    explanation: "Identical file contents",
+                    keeperFileID: 2,
+                    memberFileIDs: [2, 3]
+                ),
+                members: [file(2, "a.txt"), file(3, "b.txt")]
+            ),
+            .finished(summary: ScanSummary(filesDiscovered: 3, groupsFound: 1))
+        ])
+        let secondIDs = try XCTUnwrap(second.groups.first?.memberFileIDs)
+        XCTAssertEqual(secondIDs, firstIDs, "same paths resolve to the same durable row ids across rescans")
+        let keeper = try XCTUnwrap(second.groups.first?.keeperFileID)
+        let keeperFile = try await store.file(id: keeper)
+        XCTAssertEqual(keeperFile?.displayName, "a.txt", "keeper remapped to the store id of the right file")
     }
 
     /// Source folders are persisted on add and re-resolved by a fresh service from the same store,
