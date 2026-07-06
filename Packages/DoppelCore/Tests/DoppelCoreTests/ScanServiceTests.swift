@@ -188,6 +188,32 @@ final class ScanServiceTests: XCTestCase {
         XCTAssertTrue(rescan.groups.isEmpty, "ignored group does not recur")
     }
 
+    /// Guided review keeper override (F7): the user can keep a different file than the app suggested.
+    /// setKeeper updates the live results and persists, and ignores a file that isn't in the group.
+    func testSetKeeperOverridesSuggestionAndPersists() async throws {
+        let store = InMemoryIndexStore()
+        let group = DuplicateGroup(
+            id: 0, matchType: .exact, confidence: 1.0,
+            explanation: "Identical file contents", keeperFileID: 1, memberFileIDs: [1, 2]
+        )
+        let svc = ScanService(coordinator: StubCoordinator(events: [
+            .groupFound(group, members: [file(1, "a.txt"), file(2, "b.txt")]),
+            .finished(summary: ScanSummary(filesDiscovered: 2, groupsFound: 1))
+        ]), store: store)
+        let sessionID = try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]))
+        let surfaced = try XCTUnwrap(svc.groups.first)
+        XCTAssertEqual(surfaced.keeperFileID, 1, "app's initial suggestion")
+
+        try await svc.setKeeper(groupID: surfaced.id, fileID: 2)
+        XCTAssertEqual(svc.groups.first?.keeperFileID, 2, "live results reflect the override")
+        let persisted = try await store.groups(sessionID: sessionID).first { $0.id == surfaced.id }
+        XCTAssertEqual(persisted?.keeperFileID, 2, "override persisted")
+
+        // A file that isn't a member is ignored (no-op), leaving the keeper as set.
+        try await svc.setKeeper(groupID: surfaced.id, fileID: 999)
+        XCTAssertEqual(svc.groups.first?.keeperFileID, 2)
+    }
+
     /// Settings ▸ Ignore List "Reset" (F11): clearing the ignore list lets a previously-ignored group
     /// surface again on the next scan.
     func testClearIgnoredListLetsGroupRecur() async throws {

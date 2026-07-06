@@ -8,7 +8,7 @@ import SwiftUI
 /// history land in later T4.x tasks.
 struct RootView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var sidebarSelection: SidebarItem? = .sources
+    @State private var sidebarSelection: SidebarItem? = .home
     @State private var scanTask: Task<Void, Never>?
     @State private var showImporter = false
     @State private var scanError: String?
@@ -45,11 +45,9 @@ struct RootView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $sidebarSelection) {
-                Section("Library") {
-                    Label("Sources", systemImage: "folder").tag(SidebarItem.sources)
-                }
+                Label("Home", systemImage: "house").tag(SidebarItem.home)
                 if !scanService.sessions.isEmpty {
-                    Section("Recent Scans") {
+                    Section("History") {
                         ForEach(scanService.sessions) { session in
                             SessionRow(session: session).tag(SidebarItem.session(session.id))
                         }
@@ -57,7 +55,7 @@ struct RootView: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 240)
-        } content: {
+        } detail: {
             content
                 .navigationTitle(AppInfo.productName)
                 .toolbar { toolbarContent }
@@ -87,8 +85,6 @@ struct RootView: View {
                         + "same-meaning rewrites the fast scan misses. It's slower and uses more energy — "
                         + "best run while plugged in. Nothing leaves your Mac.")
                 }
-        } detail: {
-            InspectorPlaceholder()
         }
         .task {
             // Re-resolve remembered folders so they're scannable without re-prompting (T4.2), and
@@ -120,7 +116,34 @@ struct RootView: View {
         }
     }
 
+    /// One continuous pane: on first run, a single call to action; once folders are added, a persistent
+    /// folder+scan header with the results (or progress / ready / clean-bill states) below it.
     @ViewBuilder private var content: some View {
+        if scanService.sources.isEmpty, !isScanning, !isViewingSession {
+            ContentUnavailableView {
+                Label("Choose folders to find duplicates", systemImage: "folder.badge.plus")
+            } description: {
+                Text("Everything stays on your Mac. Nothing is ever uploaded.")
+            } actions: {
+                Button("Choose Folders…") { showImporter = true }
+                    .buttonStyle(.borderedProminent)
+            }
+        } else {
+            VStack(spacing: 0) {
+                FolderBar(
+                    sources: scanService.sources,
+                    isScanning: isScanning,
+                    onAdd: { showImporter = true },
+                    onScan: scanSources,
+                    onRemove: removeSource
+                )
+                Divider()
+                bodyRegion
+            }
+        }
+    }
+
+    @ViewBuilder private var bodyRegion: some View {
         if isScanning {
             ScanProgressView(
                 phase: scanService.phase,
@@ -146,23 +169,19 @@ struct RootView: View {
                     selection: $selection,
                     onCompare: compare,
                     onIgnore: ignoreGroup,
-                    onReveal: revealInFinder
+                    onReveal: revealInFinder,
+                    onSetKeeper: setKeeper,
+                    onRequestTrash: { showTrashConfirm = true }
                 )
             }
-        } else if !scanService.sources.isEmpty {
-            SourcesView(
-                sources: scanService.sources,
-                onScan: scanSources,
-                onAdd: { showImporter = true },
-                onRemove: removeSource
-            )
         } else {
+            // Folders are added but nothing scanned yet.
             ContentUnavailableView {
-                Label("Choose folders to find duplicates", systemImage: "folder.badge.plus")
+                Label("Ready to scan", systemImage: "magnifyingglass")
             } description: {
-                Text("Everything stays on your Mac. Nothing is ever uploaded.")
+                Text("Scan your folders to find duplicate documents. Everything stays on your Mac.")
             } actions: {
-                Button("Choose Folders…") { showImporter = true }
+                Button("Scan") { scanSources() }
                     .buttonStyle(.borderedProminent)
             }
         }
@@ -276,6 +295,13 @@ struct RootView: View {
         }
     }
 
+    /// Guided review: keep a different file than the one the app suggested (F7).
+    private func setKeeper(_ group: DuplicateGroup, _ fileID: Int64) {
+        Task {
+            do { try await scanService.setKeeper(groupID: group.id, fileID: fileID) } catch { scanError = error.localizedDescription }
+        }
+    }
+
     /// Reveal a skipped file in Finder (T8.1). SwiftUI has no equivalent, so we reach for NSWorkspace.
     private func revealInFinder(_ file: FileRecord) {
         guard let url = scanService.absoluteURL(for: file) else { return }
@@ -299,7 +325,7 @@ struct RootView: View {
 }
 
 enum SidebarItem: Hashable {
-    case sources
+    case home
     case session(Int64)
 }
 
@@ -319,38 +345,58 @@ private struct SessionRow: View {
     }
 }
 
-/// Remembered source folders (T4.2): the list persists across launches so the user re-scans without
-/// re-picking. Add/remove here; scanning runs over all sources.
-private struct SourcesView: View {
+/// Persistent header (T4.2): the remembered source folders as removable chips, an inline "Add", and the
+/// primary Scan action — so folders, scanning, and results all live in one place instead of separate
+/// destinations. The folder list persists across launches; scanning runs over all of it.
+private struct FolderBar: View {
     let sources: [ScanService.Source]
-    let onScan: () -> Void
+    let isScanning: Bool
     let onAdd: () -> Void
+    let onScan: () -> Void
     let onRemove: (Int64) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            List(sources) { source in
-                HStack {
-                    Label(source.displayPath, systemImage: "folder")
-                        .truncationMode(.middle).lineLimit(1)
-                    Spacer()
-                    Button {
-                        onRemove(source.id)
-                    } label: {
-                        Image(systemName: "minus.circle")
+        HStack(spacing: 8) {
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(sources) { source in
+                        FolderChip(source: source, disabled: isScanning, onRemove: { onRemove(source.id) })
                     }
-                    .buttonStyle(.borderless).foregroundStyle(.secondary)
-                    .help("Forget this folder")
                 }
+                .padding(.vertical, 2)
             }
-            HStack {
-                Button("Add Folders…", action: onAdd)
-                Spacer()
-                Button("Scan", action: onScan)
-                    .buttonStyle(.borderedProminent)
-            }
-            .padding()
+            Button("Add Folders…", systemImage: "plus", action: onAdd)
+                .disabled(isScanning)
+            Button("Scan", action: onScan)
+                .buttonStyle(.borderedProminent)
+                .disabled(isScanning || sources.isEmpty)
         }
+        .padding(.horizontal).padding(.vertical, 8)
+    }
+}
+
+/// One source folder as a compact, removable chip. Shows the folder name; full path in the tooltip.
+private struct FolderChip: View {
+    let source: ScanService.Source
+    let disabled: Bool
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "folder").foregroundStyle(.secondary).accessibilityHidden(true)
+            Text(source.url.lastPathComponent).lineLimit(1)
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.borderless).foregroundStyle(.secondary)
+            .disabled(disabled)
+            .help("Forget this folder")
+            .accessibilityLabel("Forget \(source.url.lastPathComponent)")
+        }
+        .font(.callout)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(.quaternary.opacity(0.5), in: Capsule())
+        .help(source.displayPath)
     }
 }
 
@@ -444,13 +490,6 @@ private struct TrashConfirmSheet: View {
         }
         .padding()
         .frame(width: 460)
-    }
-}
-
-private struct InspectorPlaceholder: View {
-    var body: some View {
-        Text("Select a group to see details")
-            .foregroundStyle(.secondary)
     }
 }
 

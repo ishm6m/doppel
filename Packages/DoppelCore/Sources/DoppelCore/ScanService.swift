@@ -402,6 +402,16 @@ public final class ScanService {
         groups.removeAll { $0.id == group.id }
     }
 
+    /// Overrides the suggested keeper for a group (guided review lets the user correct the app's pick
+    /// before trashing the rest). Persists via the store and updates the live `groups` so the UI reflects
+    /// it at once. No-op if the group isn't in the current results or `fileID` isn't one of its members.
+    public func setKeeper(groupID: Int64, fileID: Int64) async throws {
+        guard let idx = groups.firstIndex(where: { $0.id == groupID }),
+              groups[idx].memberFileIDs.contains(fileID) else { return }
+        try await store.setKeeper(groupID: groupID, fileID: fileID)
+        groups[idx].keeperFileID = fileID
+    }
+
     /// How many not-duplicate pairs are remembered (Settings ▸ Ignore List).
     public func ignoredPairCount() async -> Int {
         await ((try? store.ignoredPairs()) ?? []).count

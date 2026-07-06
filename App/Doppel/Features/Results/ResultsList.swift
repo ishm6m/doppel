@@ -2,7 +2,10 @@ import DoppelCore
 import DoppelKit
 import SwiftUI
 
-/// Expandable GroupCards plus a "Skipped (N)" section for files the scan couldn't process (UI_SPEC §6).
+/// Results, two ways to act on them (UI_SPEC §6):
+/// - **List**: the full set as expandable cards with checkboxes + a bulk action bar (power path).
+/// - **Review**: one group at a time — keep this, trash the rest, next (guided path). The review picker
+///   only appears when the host wires the review closures (finished results), not during a live scan.
 struct ResultsList: View {
     let groups: [DuplicateGroup]
     let members: [Int64: FileRecord]
@@ -11,14 +14,124 @@ struct ResultsList: View {
     let onCompare: (FileRecord, FileRecord) -> Void
     let onIgnore: (DuplicateGroup) -> Void
     let onReveal: (FileRecord) -> Void
+    /// Change a group's keeper (guided review). Nil disables the Review path (e.g. during a live scan).
+    var onSetKeeper: ((DuplicateGroup, Int64) -> Void)?
+    /// Ask the host to trash whatever is in `selection` (routes through the shared confirm sheet).
+    var onRequestTrash: (() -> Void)?
+
+    @State private var mode: Mode = .list
+    private enum Mode: String, CaseIterable { case list = "List", review = "Review" }
+
+    /// Review is offered only when both review closures are present and there's a group to review.
+    private var canReview: Bool {
+        onSetKeeper != nil && onRequestTrash != nil && !groups.isEmpty
+    }
 
     var body: some View {
-        List {
-            ForEach(groups) { group in
-                GroupCard(group: group, members: members, selection: $selection, onCompare: onCompare, onIgnore: onIgnore)
+        VStack(spacing: 0) {
+            if canReview {
+                Picker("View", selection: $mode) {
+                    ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .padding(.vertical, 6)
             }
-            if !skipped.isEmpty {
-                SkippedSection(skipped: skipped, onReveal: onReveal)
+            if mode == .review, canReview {
+                ReviewView(
+                    groups: groups, members: members, selection: $selection,
+                    onCompare: onCompare, onIgnore: onIgnore,
+                    onSetKeeper: onSetKeeper!, onRequestTrash: onRequestTrash!
+                )
+            } else {
+                List {
+                    ForEach(groups) { group in
+                        GroupCard(group: group, members: members, selection: $selection, onCompare: onCompare, onIgnore: onIgnore)
+                    }
+                    if !skipped.isEmpty {
+                        SkippedSection(skipped: skipped, onReveal: onReveal)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Guided one-at-a-time review (F7/F8): the reassurance path behind "confidence to delete". Shows a
+/// single group with its plain-language reason, the suggested keeper starred (tap another file's star to
+/// keep that one instead), and three moves: mark not-duplicates, skip, or trash everything but the keeper.
+/// Acting removes the group from `groups`, so the same index slides to the next one — no manual advance.
+private struct ReviewView: View {
+    let groups: [DuplicateGroup]
+    let members: [Int64: FileRecord]
+    @Binding var selection: Set<Int64>
+    let onCompare: (FileRecord, FileRecord) -> Void
+    let onIgnore: (DuplicateGroup) -> Void
+    let onSetKeeper: (DuplicateGroup, Int64) -> Void
+    let onRequestTrash: () -> Void
+    @State private var index = 0
+
+    private var clampedIndex: Int {
+        min(index, max(0, groups.count - 1))
+    }
+
+    var body: some View {
+        // groups can shrink under us as items are trashed/ignored; clamp and finish gracefully.
+        if groups.isEmpty {
+            ContentUnavailableView(
+                "All reviewed 🎉",
+                systemImage: "checkmark.seal",
+                description: Text("You've been through every group.")
+            )
+        } else {
+            let group = groups[clampedIndex]
+            let nonKeeperIDs = group.memberFileIDs.filter { $0 != group.keeperFileID }
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("Group \(clampedIndex + 1) of \(groups.count)")
+                        .font(.headline).monospacedDigit()
+                    Spacer()
+                    MatchBadge(group: group)
+                }
+                .padding(.horizontal).padding(.top, 4)
+
+                Text(group.explanation)
+                    .font(.title3).padding(.horizontal).padding(.top, 4)
+
+                List {
+                    ForEach(group.memberFileIDs, id: \.self) { id in
+                        if let file = members[id] {
+                            MemberRow(
+                                file: file,
+                                isKeeper: id == group.keeperFileID,
+                                isSelected: .constant(false), // review uses the star, not checkboxes
+                                showCheckbox: false,
+                                onCompare: id == group.keeperFileID ? nil : members[group.keeperFileID].map { keeper in
+                                    { onCompare(keeper, file) }
+                                },
+                                // Tap a non-keeper's star to keep it instead (the app's pick may be wrong).
+                                onMakeKeeper: id == group.keeperFileID ? nil : { onSetKeeper(group, id) }
+                            )
+                        }
+                    }
+                }
+
+                Divider()
+                HStack {
+                    Button("Not duplicates") { onIgnore(group) }
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Skip") { index = clampedIndex + 1 }
+                        .disabled(clampedIndex + 1 >= groups.count)
+                    Button("Move \(nonKeeperIDs.count) to Trash…", role: .destructive) {
+                        selection = Set(nonKeeperIDs)
+                        onRequestTrash()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(nonKeeperIDs.isEmpty)
+                }
+                .padding()
             }
         }
     }
@@ -108,10 +221,12 @@ private struct GroupCard: View {
                             get: { selection.contains(id) },
                             set: { if $0 { selection.insert(id) } else { selection.remove(id) } }
                         ),
+                        showCheckbox: true,
                         // Compare a non-keeper against the keeper — the "why did these match?" view (F8).
                         onCompare: id == group.keeperFileID ? nil : members[group.keeperFileID].map { keeper in
                             { onCompare(keeper, file) }
-                        }
+                        },
+                        onMakeKeeper: nil
                     )
                 }
             }
@@ -121,42 +236,53 @@ private struct GroupCard: View {
         .padding(.vertical, 4)
     }
 
+    /// Reason first (golden rule 4), match type + confidence demoted to a quiet secondary line.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(group.explanation).font(.body)
             HStack(spacing: 8) {
-                Text(badgeLabel)
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8).padding(.vertical, 2)
-                    .background(badgeColor.opacity(0.18), in: Capsule())
-                    .foregroundStyle(badgeColor)
-                Text("\(Int(group.confidence * 100))% confidence")
-                    .font(.caption).foregroundStyle(.secondary)
+                MatchBadge(group: group)
                 Spacer()
                 Text("\(group.memberFileIDs.count) files · \(reclaimable.formatted(.byteCount(style: .file))) reclaimable")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            // Golden rule 4: every group carries a human-readable reason.
-            Text(group.explanation).font(.body)
         }
         // VoiceOver reads the whole group summary as one phrase (ACCESSIBILITY.md §1).
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(badgeLabel), \(Int(group.confidence * 100)) percent confidence, "
+            "\(MatchBadge.label(group.matchType)), \(Int(group.confidence * 100)) percent confidence, "
                 + "\(group.memberFileIDs.count) files, "
                 + "\(reclaimable.formatted(.byteCount(style: .file))) reclaimable. \(group.explanation)"
         )
     }
+}
 
-    private var badgeLabel: String {
-        switch group.matchType {
-        case .exact: "Exact"
-        case .nearText: "Near-duplicate"
-        case .nearImage: "Similar image"
-        case .semantic: "Semantic"
+/// The match kind as a friendly, coloured chip + a quiet confidence tail — plain words, not engine terms.
+private struct MatchBadge: View {
+    let group: DuplicateGroup
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(Self.label(group.matchType))
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 8).padding(.vertical, 2)
+                .background(color.opacity(0.18), in: Capsule())
+                .foregroundStyle(color)
+            Text("\(Int(group.confidence * 100))% sure")
+                .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
         }
     }
 
-    private var badgeColor: Color {
+    static func label(_ type: MatchType) -> String {
+        switch type {
+        case .exact: "Identical"
+        case .nearText: "Almost identical"
+        case .nearImage: "Similar image"
+        case .semantic: "Same meaning"
+        }
+    }
+
+    private var color: Color {
         switch group.matchType {
         case .exact: .green
         case .nearText: .blue
@@ -166,25 +292,25 @@ private struct GroupCard: View {
     }
 }
 
-/// One file within a group (UI_SPEC.md §6 member row): selection checkbox (never pre-checked),
-/// suggested-keeper star, name/path, size.
+/// One file within a group (UI_SPEC.md §6 member row): optional selection checkbox (never pre-checked),
+/// suggested-keeper star (tappable in review to change the keeper), name/path, size.
 private struct MemberRow: View {
     let file: FileRecord
     let isKeeper: Bool
     @Binding var isSelected: Bool
+    var showCheckbox: Bool = true
     /// Opens the compare view against the keeper; nil for the keeper row itself.
     let onCompare: (() -> Void)?
+    /// Tap the star to make this file the keeper (review mode); nil disables it (list mode / keeper row).
+    var onMakeKeeper: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 8) {
-            Toggle("Select \(file.displayName)", isOn: $isSelected)
-                .labelsHidden().toggleStyle(.checkbox)
-            Image(systemName: isKeeper ? "star.fill" : "doc")
-                .foregroundStyle(isKeeper ? .yellow : .secondary)
-                .help(isKeeper ? "Suggested keeper" : "")
-                // Keeper status is meaningful; the plain doc icon is decorative.
-                .accessibilityLabel(isKeeper ? "Suggested keeper" : "")
-                .accessibilityHidden(!isKeeper)
+            if showCheckbox {
+                Toggle("Select \(file.displayName)", isOn: $isSelected)
+                    .labelsHidden().toggleStyle(.checkbox)
+            }
+            star
             VStack(alignment: .leading, spacing: 1) {
                 Text(file.displayName)
                 Text(file.relativePath)
@@ -199,6 +325,22 @@ private struct MemberRow: View {
             }
             Text(file.sizeBytes.formatted(.byteCount(style: .file)))
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var star: some View {
+        let icon = Image(systemName: isKeeper ? "star.fill" : "star")
+            .foregroundStyle(isKeeper ? .yellow : .secondary)
+        if let onMakeKeeper {
+            Button(action: onMakeKeeper) { icon }
+                .buttonStyle(.borderless)
+                .help(isKeeper ? "Suggested keeper" : "Keep this one instead")
+                .accessibilityLabel(isKeeper ? "Suggested keeper" : "Keep this file instead")
+        } else {
+            icon
+                .help(isKeeper ? "Suggested keeper" : "")
+                .accessibilityLabel(isKeeper ? "Suggested keeper" : "")
+                .accessibilityHidden(!isKeeper)
         }
     }
 }

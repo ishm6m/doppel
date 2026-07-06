@@ -2,42 +2,21 @@ import DoppelCore
 import DoppelKit
 import SwiftUI
 
-/// Native Settings scene (F11). Tabs: General (scopes), Detection (threshold, OCR), Model (provider),
-/// Ignore List (review/reset), About. Settings persist to UserDefaults via @AppStorage and feed the
-/// next scan through `DetectionSettings` — no extra wiring needed for a change to take effect.
+/// Native Settings scene (F11). Tabs: Detection (threshold, OCR), Ignore List (review/reset), About.
+/// Settings persist to UserDefaults via @AppStorage and feed the next scan through `DetectionSettings`.
+/// ponytail: the General (file-type scopes) and Model (embedding provider) tabs were dropped — both were
+/// entirely disabled placeholders (images are V2; no model is pinned yet). Re-add them when those ship.
 struct SettingsView: View {
     var body: some View {
         TabView {
-            GeneralSettings()
-                .tabItem { Label("General", systemImage: "gearshape") }
             DetectionSettingsTab()
                 .tabItem { Label("Detection", systemImage: "scope") }
-            ModelSettings()
-                .tabItem { Label("Model", systemImage: "cpu") }
             IgnoreListSettings()
                 .tabItem { Label("Ignore List", systemImage: "hand.raised") }
             AboutSettings()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 480)
-    }
-}
-
-private struct GeneralSettings: View {
-    @AppStorage(SettingsKey.scanImages) private var scanImages = false
-
-    var body: some View {
-        Form {
-            LabeledContent("File types") {
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle("Documents", isOn: .constant(true)).disabled(true)
-                    Toggle("Images", isOn: $scanImages).disabled(true)
-                    Text("Image matching arrives in a future version.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-        .formStyle(.grouped).padding(.vertical, 8).frame(height: 220)
     }
 }
 
@@ -72,21 +51,6 @@ private struct DetectionSettingsTab: View {
             }
         }
         .formStyle(.grouped).padding(.vertical, 8).frame(height: 280)
-    }
-}
-
-private struct ModelSettings: View {
-    var body: some View {
-        Form {
-            Picker("Embedding model", selection: .constant(0)) {
-                Text("Built-in (deterministic stub)").tag(0)
-            }
-            .disabled(true)
-            Text("A Core ML semantic model will be selectable here once one is pinned. "
-                + "Everything runs on-device either way.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .formStyle(.grouped).padding(.vertical, 8).frame(height: 220)
     }
 }
 
