@@ -46,10 +46,17 @@ struct RootView: View {
         NavigationSplitView {
             List(selection: $sidebarSelection) {
                 Label("Home", systemImage: "house").tag(SidebarItem.home)
-                if !scanService.sessions.isEmpty {
-                    Section("History") {
+                Section("Scans") {
+                    if scanService.sessions.isEmpty {
+                        Text("Run a scan to see it here.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else {
                         ForEach(scanService.sessions) { session in
-                            SessionRow(session: session).tag(SidebarItem.session(session.id))
+                            SessionRow(session: session, folders: folderLabel(for: session))
+                                .tag(SidebarItem.session(session.id))
+                                .swipeActions(edge: .trailing) {
+                                    Button("Delete", role: .destructive) { forgetSession(session.id) }
+                                }
                         }
                     }
                 }
@@ -256,6 +263,24 @@ struct RootView: View {
         runScan(deepScan: false)
     }
 
+    /// The folder names a past scan covered, e.g. "Downloads" or "Downloads +2" — the human-memorable
+    /// identity of a scan (a timestamp isn't). Falls back to "Folders" if the sources are no longer remembered.
+    private func folderLabel(for session: ScanSession) -> String {
+        let names = session.rootBookmarkIDs.compactMap { id in
+            scanService.sources.first { $0.id == id }.map { URL(fileURLWithPath: $0.displayPath).lastPathComponent }
+        }
+        guard let first = names.first else { return "Folders" }
+        return names.count > 1 ? "\(first) +\(names.count - 1)" : first
+    }
+
+    /// Forget a past scan from history (files untouched). If it was the open one, fall back to Home.
+    private func forgetSession(_ id: Int64) {
+        if sidebarSelection == .session(id) { sidebarSelection = .home }
+        Task {
+            do { try await scanService.deleteSession(id) } catch { scanError = error.localizedDescription }
+        }
+    }
+
     /// Scan every remembered source, tying the session to those sources' bookmark ids. `deepScan` turns
     /// on the opt-in semantic tier (F6) for this run only — it's an explicit action, never a persisted default.
     private func runScan(deepScan: Bool) {
@@ -325,19 +350,26 @@ enum SidebarItem: Hashable {
     case session(Int64)
 }
 
-/// One past scan in the history sidebar (F12): when it ran + what it found.
+/// One past scan in the history sidebar (F12). Leads with the folder(s) scanned — the memorable
+/// identity — then a relative time, then the outcome (duplicate count / "Clean" when none).
 private struct SessionRow: View {
     let session: ScanSession
+    let folders: String
+
+    private var outcome: String {
+        session.groupsFound == 0
+            ? "Clean"
+            : "\(session.groupsFound) group\(session.groupsFound == 1 ? "" : "s") · "
+            + session.bytesReclaimable.formatted(.byteCount(style: .file))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(session.startedAt.formatted(date: .abbreviated, time: .shortened))
-                .lineLimit(1)
-            Text("\(session.groupsFound) group\(session.groupsFound == 1 ? "" : "s") · "
-                + session.bytesReclaimable.formatted(.byteCount(style: .file)))
-                .font(.caption).foregroundStyle(.secondary)
+            Text(folders).lineLimit(1)
+            Text(session.startedAt.formatted(.relative(presentation: .named)) + " · " + outcome)
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
-        .help("Reopen this scan")
+        .help("Reopen this scan of \(folders)")
     }
 }
 

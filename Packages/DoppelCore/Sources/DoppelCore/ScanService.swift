@@ -241,6 +241,12 @@ public final class ScanService {
         sessions = await ((try? store.sessions()) ?? []).sorted { $0.startedAt > $1.startedAt }
     }
 
+    /// Forgets a past scan from history. Files are untouched; only the scan record + its groups go.
+    public func deleteSession(_ id: Int64) async throws {
+        try await store.deleteSession(id: id)
+        sessions.removeAll { $0.id == id }
+    }
+
     /// Reopens a past scan: loads its groups + member records into the live results state so the same
     /// results UI renders them. Rebuilds source URLs from the still-remembered sources, so compare/trash
     /// work when those folders are still added; otherwise actions degrade safely (paths won't resolve).

@@ -116,6 +116,15 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
     try await store.ignorePair(21, 11)
     let ignoredPairs = try await store.ignoredPairs()
     XCTAssertTrue(ignoredPairs.contains(Pair(11, 21)))
+
+    // Deleting a session forgets it and cascades its groups; the scanned files persist.
+    try await store.deleteSession(id: ssid)
+    let remainingSessions = try await store.sessions()
+    let cascadedGroups = try await store.groups(sessionID: ssid)
+    let survivingFile = try await store.file(id: 11)
+    XCTAssertFalse(remainingSessions.contains { $0.id == ssid })
+    XCTAssertTrue(cascadedGroups.isEmpty)
+    XCTAssertNotNil(survivingFile, "files outlive their scan session")
 }
 
 /// Regression: removing a source whose file is a group's keeper must not trip the keeper FK

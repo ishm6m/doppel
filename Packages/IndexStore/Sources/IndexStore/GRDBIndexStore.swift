@@ -426,6 +426,13 @@ public actor GRDBIndexStore: IndexStoring {
             try Row.fetchAll(db, sql: "SELECT * FROM scan_session ORDER BY id").map(decodeSession)
         }
     }
+
+    public func deleteSession(id: Int64) async throws {
+        // duplicate_group.scan_id cascades → group_member + match_edge drop too. Files stay (tied to sources).
+        try await dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM scan_session WHERE id = ?", arguments: [id])
+        }
+    }
 }
 
 // MARK: - Row mapping helpers (nonisolated; safe to call inside @Sendable db closures)
