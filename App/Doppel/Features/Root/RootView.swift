@@ -70,7 +70,7 @@ struct RootView: View {
                 .sheet(item: $comparing) { pair in
                     CompareView(pair: pair) { await scanService.compareTexts($0, $1) }
                 }
-                .sheet(isPresented: .init(get: { !onboardingComplete }, set: { if $0 { onboardingComplete = false } })) {
+                .sheet(isPresented: .init(get: { !onboardingComplete }, set: { onboardingComplete = !$0 })) {
                     OnboardingView { chooseFolders in
                         onboardingComplete = true
                         if chooseFolders { showImporter = true }
