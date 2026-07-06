@@ -51,19 +51,23 @@ struct ResultsList: View {
                 )
             } else {
                 List {
-                    // One-shot "keep one of each, check the rest" — collapses per-group selection into a
-                    // single action. Never pre-checked (golden rule 3): the user taps it, then confirms via
-                    // the shared trash sheet. The bottom bar's Deselect reverses it.
-                    if allNonKeeperIDs.count > 1 {
-                        Button {
+                    // One-shot "clean it all up": pre-select every non-keeper across all groups and open
+                    // the confirm sheet (which lists them + total freed) in one move. Never trashes without
+                    // that confirm (golden rule 3); the keeper is always excluded. Only when we can trash
+                    // (finished session, not a live scan).
+                    if allNonKeeperIDs.count > 1, let onRequestTrash {
+                        Button(role: .destructive) {
                             selection = Set(allNonKeeperIDs)
+                            onRequestTrash()
                         } label: {
                             Label(
-                                "Select all \(allNonKeeperIDs.count) duplicates (keep starred)",
-                                systemImage: "checklist"
+                                "Trash all \(allNonKeeperIDs.count) duplicates (keep starred)…",
+                                systemImage: "trash"
                             )
                         }
-                        .help("Checks every file except the suggested keeper in each group. Confirm before it trashes anything.")
+                        .help(
+                            "Moves every file except the suggested keeper in each group to the Trash. You'll confirm the full list first."
+                        )
                     }
                     ForEach(groups) { group in
                         GroupCard(group: group, members: members, selection: $selection, onCompare: onCompare, onIgnore: onIgnore)
@@ -206,7 +210,24 @@ private struct GroupCard: View {
     @Binding var selection: Set<Int64>
     let onCompare: (FileRecord, FileRecord) -> Void
     let onIgnore: (DuplicateGroup) -> Void
-    @State private var isExpanded = false
+    @State private var isExpanded: Bool
+
+    init(
+        group: DuplicateGroup,
+        members: [Int64: FileRecord],
+        selection: Binding<Set<Int64>>,
+        onCompare: @escaping (FileRecord, FileRecord) -> Void,
+        onIgnore: @escaping (DuplicateGroup) -> Void
+    ) {
+        self.group = group
+        self.members = members
+        _selection = selection
+        self.onCompare = onCompare
+        self.onIgnore = onIgnore
+        // Identical-content groups are the highest-confidence, most-actionable — open them on load;
+        // near-dup / same-meaning groups start collapsed to keep the list scannable.
+        _isExpanded = State(initialValue: group.matchType == .exact)
+    }
 
     private var nonKeeperIDs: [Int64] {
         group.nonKeeperFileIDs
