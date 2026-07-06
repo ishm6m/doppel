@@ -25,6 +25,8 @@ struct RootView: View {
     /// The session being renamed (drives the rename alert), plus its editable name buffer.
     @State private var renamingSession: Int64?
     @State private var renameText = ""
+    /// Gate for the "Clear History" confirmation (F12): bulk-forgets unpinned scans, never touches files.
+    @State private var showClearConfirm = false
 
     private var scanService: ScanService {
         env.scanService
@@ -49,7 +51,7 @@ struct RootView: View {
         NavigationSplitView {
             List(selection: $sidebarSelection) {
                 Label("Home", systemImage: "house").tag(SidebarItem.home)
-                Section("Scans") {
+                Section {
                     if scanService.sessions.isEmpty {
                         Text("Run a scan to see it here.")
                             .font(.callout).foregroundStyle(.secondary)
@@ -72,6 +74,23 @@ struct RootView: View {
                                 Divider()
                                 Button("Delete", role: .destructive) { forgetSession(session.id) }
                             }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Scans")
+                        Spacer()
+                        // Bulk-clear lives in a low-emphasis header menu (used rarely), and only appears
+                        // when there's something unpinned to clear — pinned scans are always kept.
+                        if scanService.sessions.contains(where: { !$0.pinned }) {
+                            Menu {
+                                Button("Clear History…", role: .destructive) { showClearConfirm = true }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                            }
+                            .menuIndicator(.hidden)
+                            .buttonStyle(.borderless)
+                            .help("Clear scan history")
                         }
                     }
                 }
@@ -145,6 +164,13 @@ struct RootView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Leave blank to show the scanned folder name.")
+        }
+        .confirmationDialog("Clear scan history?", isPresented: $showClearConfirm, titleVisibility: .visible) {
+            Button("Clear History", role: .destructive) { clearHistory() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes your past scans from the list. Pinned scans are kept. "
+                + "Your files are not touched — nothing is deleted from disk.")
         }
     }
 
@@ -299,13 +325,14 @@ struct RootView: View {
         return others > 0 ? "\(first) +\(others) other\(others == 1 ? "" : "s")" : first
     }
 
-    /// Full folder paths for a scan, one per line — the hover tooltip that disambiguates same-named
-    /// folders the compact "+N others" title collapses (e.g. two "Invoices" in different places).
+    /// The scan's folder names, one per line — the hover tooltip that reveals exactly which folders the
+    /// compact "+N others" title collapses. Empty (no tooltip) for a single folder, where the label is
+    /// already the full name and a tooltip would just echo it.
     private func folderTooltip(for session: ScanSession) -> String {
-        let paths = session.rootBookmarkIDs.compactMap { id in
-            scanService.sources.first { $0.id == id }?.displayPath
+        let names = session.rootBookmarkIDs.compactMap { id in
+            scanService.sources.first { $0.id == id }.map { URL(fileURLWithPath: $0.displayPath).lastPathComponent }
         }
-        return paths.isEmpty ? "" : paths.joined(separator: "\n")
+        return names.count > 1 ? names.joined(separator: "\n") : ""
     }
 
     /// Forget a past scan from history (files untouched). If it was the open one, fall back to Home.
@@ -313,6 +340,19 @@ struct RootView: View {
         if sidebarSelection == .session(id) { sidebarSelection = .home }
         Task {
             do { try await scanService.deleteSession(id) } catch { scanError = error.localizedDescription }
+        }
+    }
+
+    /// Forget every unpinned scan at once (F12). Pinned scans survive; files are never touched — deleting
+    /// a session only drops the scan record and its groupings. If the open scan is among the cleared, fall
+    /// back to Home.
+    private func clearHistory() {
+        let doomed = scanService.sessions.filter { !$0.pinned }.map(\.id)
+        if doomed.contains(where: { sidebarSelection == .session($0) }) { sidebarSelection = .home }
+        Task {
+            for id in doomed {
+                do { try await scanService.deleteSession(id) } catch { scanError = error.localizedDescription }
+            }
         }
     }
 
@@ -411,39 +451,6 @@ enum SidebarItem: Hashable {
 /// One past scan in the history sidebar (F12). Leads with its title (custom name, else the folder(s)
 /// scanned — the memorable identity), then a relative time + outcome ("Clean" when none). A pin marks
 /// favorites; a "Rescan" badge flags scans whose folders changed on disk since.
-private struct SessionRow: View {
-    let title: String
-    let pinned: Bool
-    let stale: Bool
-    let session: ScanSession
-
-    private var outcome: String {
-        session.groupsFound == 0
-            ? "Clean"
-            : "\(session.groupsFound) group\(session.groupsFound == 1 ? "" : "s") · "
-            + session.bytesReclaimable.formatted(.byteCount(style: .file))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                if pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }
-                Text(title).lineLimit(1)
-                if stale {
-                    Text("Rescan")
-                        .font(.caption2.weight(.medium)).foregroundStyle(.orange)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(.orange.opacity(0.15), in: Capsule())
-                        .help("Files in this folder changed since this scan.")
-                }
-            }
-            Text(session.startedAt.formatted(.relative(presentation: .named)) + " · " + outcome)
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-        }
-        .help("Reopen this scan of \(title)")
-    }
-}
-
 /// Persistent header: the primary actions only — Add Folders + Scan. Sits directly under the toolbar
 /// in every state and never moves. Folder chips were removed from the header (they dragged focus and
 /// competed with the primary actions); the folder set still persists across launches and is scanned.
