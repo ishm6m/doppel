@@ -437,7 +437,8 @@ private struct ScanProgressView: View {
                 HStack {
                     Text(label).font(.headline)
                     Spacer()
-                    Text("\(groups.count) groups · \(reclaimable.formatted(.byteCount(style: .file))) reclaimable")
+                    Text("\(groups.count) group\(groups.count == 1 ? "" : "s") · "
+                        + "\(reclaimable.formatted(.byteCount(style: .file))) reclaimable")
                         .font(.callout).foregroundStyle(.secondary).monospacedDigit()
                 }
                 // Determinate where countable (phase known + total>0); indeterminate during enumeration.

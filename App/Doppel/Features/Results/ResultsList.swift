@@ -41,7 +41,8 @@ struct ResultsList: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
-                .padding(.vertical, 6)
+                .padding(.horizontal).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             if mode == .review, canReview {
                 ReviewView(
@@ -54,20 +55,24 @@ struct ResultsList: View {
                     // One-shot "clean it all up": pre-select every non-keeper across all groups and open
                     // the confirm sheet (which lists them + total freed) in one move. Never trashes without
                     // that confirm (golden rule 3); the keeper is always excluded. Only when we can trash
-                    // (finished session, not a live scan).
+                    // (finished session, not a live scan). Its own Section so this global destructive action
+                    // reads as a deliberate summary, not another group row you might hit by accident.
                     if allNonKeeperIDs.count > 1, let onRequestTrash {
-                        Button(role: .destructive) {
-                            selection = Set(allNonKeeperIDs)
-                            onRequestTrash()
-                        } label: {
-                            Label(
-                                "Trash all \(allNonKeeperIDs.count) duplicates (keep starred)…",
-                                systemImage: "trash"
+                        Section {
+                            Button(role: .destructive) {
+                                selection = Set(allNonKeeperIDs)
+                                onRequestTrash()
+                            } label: {
+                                Label(
+                                    "Trash all \(allNonKeeperIDs.count) duplicates (keep starred)…",
+                                    systemImage: "trash"
+                                )
+                            }
+                            .help(
+                                "Moves every file except the starred keeper in each group to the Trash. "
+                                    + "You'll confirm the full list first."
                             )
                         }
-                        .help(
-                            "Moves every file except the suggested keeper in each group to the Trash. You'll confirm the full list first."
-                        )
                     }
                     ForEach(groups) { group in
                         GroupCard(group: group, members: members, selection: $selection, onCompare: onCompare, onIgnore: onIgnore)
@@ -308,8 +313,12 @@ private struct MatchBadge: View {
                 .padding(.horizontal, 8).padding(.vertical, 2)
                 .background(color.opacity(0.18), in: Capsule())
                 .foregroundStyle(color)
-            Text("\(Int(group.confidence * 100))% sure")
-                .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+            // Identical is certain by definition; a "% sure" tail there reads as doubt. Only show it
+            // for the fuzzy tiers (near-dup / same-meaning) where confidence is a real signal.
+            if group.matchType != .exact {
+                Text("\(Int(group.confidence * 100))% sure")
+                    .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+            }
         }
     }
 
