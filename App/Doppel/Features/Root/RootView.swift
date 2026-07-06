@@ -116,30 +116,22 @@ struct RootView: View {
         }
     }
 
-    /// One continuous pane: on first run, a single call to action; once folders are added, a persistent
-    /// folder+scan header with the results (or progress / ready / clean-bill states) below it.
-    @ViewBuilder private var content: some View {
-        if scanService.sources.isEmpty, !isScanning, !isViewingSession {
-            ContentUnavailableView {
-                Label("Choose folders to find duplicates", systemImage: "folder.badge.plus")
-            } description: {
-                Text("Everything stays on your Mac. Nothing is ever uploaded.")
-            } actions: {
-                Button("Choose Folders…") { showImporter = true }
-                    .buttonStyle(.borderedProminent)
-            }
-        } else {
-            VStack(spacing: 0) {
-                FolderBar(
-                    sources: scanService.sources,
-                    isScanning: isScanning,
-                    onAdd: { showImporter = true },
-                    onScan: scanSources,
-                    onRemove: removeSource
-                )
-                Divider()
-                bodyRegion
-            }
+    /// One continuous pane with a fixed hierarchy: a persistent header (Add Folders + Scan) pinned
+    /// directly under the toolbar, a divider, and a content region that always fills the rest. Only
+    /// `bodyRegion`'s empty states center themselves — the header never moves between states.
+    private var content: some View {
+        VStack(spacing: 0) {
+            HomeHeader(
+                isScanning: isScanning,
+                canScan: !scanService.sources.isEmpty,
+                onAdd: { showImporter = true },
+                onScan: scanSources
+            )
+            Divider()
+            bodyRegion
+                // Pin the header top-down: the region owns all remaining height, so a centered
+                // empty state centers inside *this*, never dragging the header to the middle.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -173,6 +165,16 @@ struct RootView: View {
                     onSetKeeper: setKeeper,
                     onRequestTrash: { showTrashConfirm = true }
                 )
+            }
+        } else if scanService.sources.isEmpty {
+            // First run: no folders chosen yet.
+            ContentUnavailableView {
+                Label("Choose folders to find duplicates", systemImage: "folder.badge.plus")
+            } description: {
+                Text("Everything stays on your Mac. Nothing is ever uploaded.")
+            } actions: {
+                Button("Choose Folders…") { showImporter = true }
+                    .buttonStyle(.borderedProminent)
             }
         } else {
             // Folders are added but nothing scanned yet.
@@ -279,12 +281,6 @@ struct RootView: View {
         }
     }
 
-    private func removeSource(_ id: Int64) {
-        Task {
-            do { try await scanService.removeSource(id: id) } catch { scanError = error.localizedDescription }
-        }
-    }
-
     private func compare(_ keeper: FileRecord, _ other: FileRecord) {
         comparing = ComparePair(keeper: keeper, other: other)
     }
@@ -345,58 +341,25 @@ private struct SessionRow: View {
     }
 }
 
-/// Persistent header (T4.2): the remembered source folders as removable chips, an inline "Add", and the
-/// primary Scan action — so folders, scanning, and results all live in one place instead of separate
-/// destinations. The folder list persists across launches; scanning runs over all of it.
-private struct FolderBar: View {
-    let sources: [ScanService.Source]
+/// Persistent header: the primary actions only — Add Folders + Scan. Sits directly under the toolbar
+/// in every state and never moves. Folder chips were removed from the header (they dragged focus and
+/// competed with the primary actions); the folder set still persists across launches and is scanned.
+private struct HomeHeader: View {
     let isScanning: Bool
+    let canScan: Bool
     let onAdd: () -> Void
     let onScan: () -> Void
-    let onRemove: (Int64) -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    ForEach(sources) { source in
-                        FolderChip(source: source, disabled: isScanning, onRemove: { onRemove(source.id) })
-                    }
-                }
-                .padding(.vertical, 2)
-            }
             Button("Add Folders…", systemImage: "plus", action: onAdd)
                 .disabled(isScanning)
+            Spacer()
             Button("Scan", action: onScan)
                 .buttonStyle(.borderedProminent)
-                .disabled(isScanning || sources.isEmpty)
+                .disabled(isScanning || !canScan)
         }
         .padding(.horizontal).padding(.vertical, 8)
-    }
-}
-
-/// One source folder as a compact, removable chip. Shows the folder name; full path in the tooltip.
-private struct FolderChip: View {
-    let source: ScanService.Source
-    let disabled: Bool
-    let onRemove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "folder").foregroundStyle(.secondary).accessibilityHidden(true)
-            Text(source.url.lastPathComponent).lineLimit(1)
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-            }
-            .buttonStyle(.borderless).foregroundStyle(.secondary)
-            .disabled(disabled)
-            .help("Forget this folder")
-            .accessibilityLabel("Forget \(source.url.lastPathComponent)")
-        }
-        .font(.callout)
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(.quaternary.opacity(0.5), in: Capsule())
-        .help(source.displayPath)
     }
 }
 
