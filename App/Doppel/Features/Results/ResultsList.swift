@@ -157,6 +157,18 @@ private struct SummaryStrip: View {
     }
 }
 
+/// A group's scannable headline: the shared filename when every member has the same name, otherwise the
+/// keeper's name + "+N" — far easier to read than a generic match description. Falls back to a neutral
+/// label if members didn't load. Shared by the list card and the review pane so both read the same.
+private func groupTitle(_ group: DuplicateGroup, _ members: [Int64: FileRecord]) -> String {
+    let names = group.memberFileIDs.compactMap { members[$0]?.displayName }
+    guard let first = names.first else { return "Duplicate group" }
+    if Set(names).count == 1 { return first }
+    let keeperName = members[group.keeperFileID]?.displayName ?? first
+    let others = group.memberFileIDs.count - 1
+    return others > 0 ? "\(keeperName) +\(others)" : keeperName
+}
+
 /// Guided one-at-a-time review (F7/F8): the reassurance path behind "confidence to delete". Shows a
 /// single group with its plain-language reason, the suggested keeper starred (tap another file's star to
 /// keep that one instead), and three moves: mark not-duplicates, skip, or trash everything but the keeper.
@@ -195,8 +207,13 @@ private struct ReviewView: View {
                 }
                 .padding(.horizontal).padding(.top, 4)
 
-                Text(group.explanation)
-                    .font(.title3).padding(.horizontal).padding(.top, 4)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(groupTitle(group, members))
+                        .font(.title3.weight(.medium)).lineLimit(1).truncationMode(.middle)
+                    // Plain-language reason stays with the group (golden rule 4), now as the subtitle.
+                    Text(group.explanation).font(.callout).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal).padding(.top, 4)
 
                 List {
                     ForEach(group.memberFileIDs, id: \.self) { id in
@@ -309,17 +326,7 @@ private struct GroupCard: View {
         group.nonKeeperFileIDs
     }
 
-    /// The group's headline: the shared filename when every member has the same name, otherwise the
-    /// keeper's name + "+N" — far easier to scan than a generic "Identical File Contents". Falls back
-    /// to a neutral label if members somehow didn't load.
-    private var title: String {
-        let names = group.memberFileIDs.compactMap { members[$0]?.displayName }
-        guard let first = names.first else { return "Duplicate group" }
-        if Set(names).count == 1 { return first }
-        let keeperName = members[group.keeperFileID]?.displayName ?? first
-        let others = group.memberFileIDs.count - 1
-        return others > 0 ? "\(keeperName) +\(others)" : keeperName
-    }
+    private var title: String { groupTitle(group, members) }
 
     /// Space freed if every non-keeper in this group is trashed (F7 per-group reclaimable size).
     private var reclaimable: Int64 {
@@ -380,7 +387,7 @@ private struct GroupCard: View {
         // VoiceOver reads the whole group summary as one phrase (ACCESSIBILITY.md §1).
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(MatchBadge.label(group.matchType)), \(Int(group.confidence * 100)) percent confidence, "
+            "\(title). \(MatchBadge.label(group.matchType)), \(Int(group.confidence * 100)) percent confidence, "
                 + "\(group.memberFileIDs.count) files, "
                 + "\(reclaimable.formatted(.byteCount(style: .file))) reclaimable. \(group.explanation)"
         )
