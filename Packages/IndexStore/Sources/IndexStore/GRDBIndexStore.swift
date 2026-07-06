@@ -112,6 +112,12 @@ public actor GRDBIndexStore: IndexStoring {
                 t.primaryKey(["file_a", "file_b"])
             }
         }
+        m.registerMigration("v2_session_name_pinned") { db in
+            try db.alter(table: "scan_session") { t in
+                t.add(column: "name", .text)
+                t.add(column: "pinned", .integer).notNull().defaults(to: 0)
+            }
+        }
         return m
     }
 
@@ -380,24 +386,27 @@ public actor GRDBIndexStore: IndexStoring {
                 try db.execute(
                     sql: """
                     INSERT INTO scan_session
-                      (started_at, finished_at, scopes_json, files_discovered, groups_found, bytes_reclaimable, state)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                      (started_at, finished_at, scopes_json, files_discovered, groups_found,
+                       bytes_reclaimable, state, name, pinned)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     arguments: [session.startedAt.timeIntervalSince1970, session.finishedAt?.timeIntervalSince1970,
                                 scopesJSON, session.filesDiscovered, session.groupsFound,
-                                session.bytesReclaimable, session.state.rawValue]
+                                session.bytesReclaimable, session.state.rawValue, session.name, session.pinned]
                 )
                 return db.lastInsertedRowID
             } else {
                 try db.execute(
                     sql: """
                     INSERT INTO scan_session
-                      (id, started_at, finished_at, scopes_json, files_discovered, groups_found, bytes_reclaimable, state)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                      (id, started_at, finished_at, scopes_json, files_discovered, groups_found,
+                       bytes_reclaimable, state, name, pinned)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     arguments: [session.id, session.startedAt.timeIntervalSince1970,
                                 session.finishedAt?.timeIntervalSince1970, scopesJSON, session.filesDiscovered,
-                                session.groupsFound, session.bytesReclaimable, session.state.rawValue]
+                                session.groupsFound, session.bytesReclaimable, session.state.rawValue,
+                                session.name, session.pinned]
                 )
                 return session.id
             }
@@ -411,12 +420,12 @@ public actor GRDBIndexStore: IndexStoring {
                 sql: """
                 UPDATE scan_session SET
                   started_at = ?, finished_at = ?, scopes_json = ?, files_discovered = ?,
-                  groups_found = ?, bytes_reclaimable = ?, state = ?
+                  groups_found = ?, bytes_reclaimable = ?, state = ?, name = ?, pinned = ?
                 WHERE id = ?
                 """,
                 arguments: [session.startedAt.timeIntervalSince1970, session.finishedAt?.timeIntervalSince1970,
                             scopesJSON, session.filesDiscovered, session.groupsFound,
-                            session.bytesReclaimable, session.state.rawValue, session.id]
+                            session.bytesReclaimable, session.state.rawValue, session.name, session.pinned, session.id]
             )
         }
     }
@@ -515,7 +524,8 @@ private func decodeSession(_ row: Row) throws -> ScanSession {
         finishedAt: finished.map { Date(timeIntervalSince1970: $0) },
         rootBookmarkIDs: payload.roots, scopes: scopes,
         filesDiscovered: row["files_discovered"], groupsFound: row["groups_found"],
-        bytesReclaimable: row["bytes_reclaimable"], state: state
+        bytesReclaimable: row["bytes_reclaimable"], state: state,
+        name: row["name"], pinned: row["pinned"]
     )
 }
 

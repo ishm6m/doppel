@@ -192,6 +192,10 @@ public struct ScanSession: Identifiable, Sendable, Hashable {
     public var groupsFound: Int
     public var bytesReclaimable: Int64
     public var state: ScanState
+    /// User-given name shown instead of the folder label in history; nil = show the scanned folder(s).
+    public var name: String?
+    /// Pinned scans sort to the top of history and survive as favorites.
+    public var pinned: Bool
 
     public init(
         id: Int64,
@@ -202,7 +206,9 @@ public struct ScanSession: Identifiable, Sendable, Hashable {
         filesDiscovered: Int = 0,
         groupsFound: Int = 0,
         bytesReclaimable: Int64 = 0,
-        state: ScanState = .running
+        state: ScanState = .running,
+        name: String? = nil,
+        pinned: Bool = false
     ) {
         self.id = id
         self.startedAt = startedAt
@@ -213,6 +219,8 @@ public struct ScanSession: Identifiable, Sendable, Hashable {
         self.groupsFound = groupsFound
         self.bytesReclaimable = bytesReclaimable
         self.state = state
+        self.name = name
+        self.pinned = pinned
     }
 }
 

@@ -29,8 +29,13 @@ public final class ScanService {
     /// Authoritative summary, set when the scan terminates.
     public private(set) var summary: ScanSummary?
 
-    /// Past scans, newest first, for the history sidebar (F12). Refreshed on demand + after each scan.
+    /// Past scans for the history sidebar (F12): pinned first, then newest. Refreshed on demand + after each scan.
     public private(set) var sessions: [ScanSession] = []
+
+    /// Sessions whose scanned folders changed on disk since the scan finished — the UI flags them "Rescan".
+    /// ponytail: folder mtime only, so it catches files added/removed/renamed at a root's top level, not
+    /// in-place edits or changes deep in subfolders. Re-walk the tree if that precision is ever needed.
+    public private(set) var staleSessionIDs: Set<Int64> = []
 
     /// A file the scan couldn't process (corrupt, unreadable, scanned-PDF-needs-OCR, …) paired with why.
     /// Surfaced as "Skipped (N)" so a bad file is never silently dropped and never fails the scan (T8.1).
@@ -236,15 +241,56 @@ public final class ScanService {
         return sessionID
     }
 
-    /// Loads the scan history, newest first (F12).
+    /// Loads the scan history (F12): pinned first, then newest, and refreshes staleness.
     public func loadSessions() async {
-        sessions = await ((try? store.sessions()) ?? []).sorted { $0.startedAt > $1.startedAt }
+        sessions = await ((try? store.sessions()) ?? []).sorted(by: Self.historyOrder)
+        recomputeStaleness()
+    }
+
+    /// Pinned before unpinned, then newest first.
+    private static func historyOrder(_ a: ScanSession, _ b: ScanSession) -> Bool {
+        a.pinned == b.pinned ? a.startedAt > b.startedAt : a.pinned
+    }
+
+    /// Flags sessions whose source folders' top-level contents changed since the scan finished. See the
+    /// `staleSessionIDs` note for the mtime-only ceiling. Cheap: one stat per remembered root.
+    private func recomputeStaleness() {
+        var stale: Set<Int64> = []
+        for session in sessions {
+            guard let finished = session.finishedAt else { continue }
+            for bid in session.rootBookmarkIDs {
+                guard let url = sources.first(where: { $0.id == bid })?.url,
+                      let mod = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                      mod > finished else { continue }
+                stale.insert(session.id)
+                break
+            }
+        }
+        staleSessionIDs = stale
     }
 
     /// Forgets a past scan from history. Files are untouched; only the scan record + its groups go.
     public func deleteSession(_ id: Int64) async throws {
         try await store.deleteSession(id: id)
         sessions.removeAll { $0.id == id }
+        staleSessionIDs.remove(id)
+    }
+
+    /// Renames a past scan (nil/blank clears back to the folder label). Persists and re-sorts live.
+    public func renameSession(_ id: Int64, to name: String?) async throws {
+        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        sessions[idx].name = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        try await store.updateSession(sessions[idx])
+        sessions.sort(by: Self.historyOrder)
+    }
+
+    /// Pins/unpins a past scan. Persists and re-sorts live (pinned float to the top).
+    public func setPinned(_ id: Int64, _ pinned: Bool) async throws {
+        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[idx].pinned = pinned
+        try await store.updateSession(sessions[idx])
+        sessions.sort(by: Self.historyOrder)
     }
 
     /// Reopens a past scan: loads its groups + member records into the live results state so the same

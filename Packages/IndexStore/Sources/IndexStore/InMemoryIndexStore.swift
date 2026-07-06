@@ -176,7 +176,9 @@ public actor InMemoryIndexStore: IndexStoring {
             filesDiscovered: session.filesDiscovered,
             groupsFound: session.groupsFound,
             bytesReclaimable: session.bytesReclaimable,
-            state: session.state
+            state: session.state,
+            name: session.name,
+            pinned: session.pinned
         )
         return id
     }

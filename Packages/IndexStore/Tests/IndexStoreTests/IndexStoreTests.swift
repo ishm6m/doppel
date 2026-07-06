@@ -117,7 +117,23 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
     let ignoredPairs = try await store.ignoredPairs()
     XCTAssertTrue(ignoredPairs.contains(Pair(11, 21)))
 
-    // Deleting a session forgets it and cascades its groups; the scanned files persist.
+    try await assertSessionNamePinDelete(store, ssid: ssid)
+}
+
+/// Session history management: name/pin default off, round-trip through updateSession, and delete forgets
+/// the session + cascades its groups while the scanned files (id 11) persist.
+private func assertSessionNamePinDelete(_ store: any IndexStoring, ssid: Int64) async throws {
+    let session = try await store.sessions().first { $0.id == ssid }
+    XCTAssertNil(session?.name) // no custom name by default
+    XCTAssertEqual(session?.pinned, false)
+    var renamed = try XCTUnwrap(session)
+    renamed.name = "Q3 Contracts"
+    renamed.pinned = true
+    try await store.updateSession(renamed)
+    let reloaded = try await store.sessions().first { $0.id == ssid }
+    XCTAssertEqual(reloaded?.name, "Q3 Contracts")
+    XCTAssertEqual(reloaded?.pinned, true)
+
     try await store.deleteSession(id: ssid)
     let remainingSessions = try await store.sessions()
     let cascadedGroups = try await store.groups(sessionID: ssid)

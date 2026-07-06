@@ -22,6 +22,9 @@ struct RootView: View {
     @State private var comparing: ComparePair?
     /// First-launch onboarding gate (F10): shown once, then persisted so it never reappears.
     @AppStorage("onboardingComplete") private var onboardingComplete = false
+    /// The session being renamed (drives the rename alert), plus its editable name buffer.
+    @State private var renamingSession: Int64?
+    @State private var renameText = ""
 
     private var scanService: ScanService {
         env.scanService
@@ -52,11 +55,22 @@ struct RootView: View {
                             .font(.callout).foregroundStyle(.secondary)
                     } else {
                         ForEach(scanService.sessions) { session in
-                            SessionRow(session: session, folders: folderLabel(for: session))
-                                .tag(SidebarItem.session(session.id))
-                                .swipeActions(edge: .trailing) {
-                                    Button("Delete", role: .destructive) { forgetSession(session.id) }
-                                }
+                            SessionRow(
+                                title: session.name ?? folderLabel(for: session),
+                                pinned: session.pinned,
+                                stale: scanService.staleSessionIDs.contains(session.id),
+                                session: session
+                            )
+                            .tag(SidebarItem.session(session.id))
+                            .swipeActions(edge: .trailing) {
+                                Button("Delete", role: .destructive) { forgetSession(session.id) }
+                            }
+                            .contextMenu {
+                                Button("Rename…") { beginRename(session) }
+                                Button(session.pinned ? "Unpin" : "Pin") { togglePin(session) }
+                                Divider()
+                                Button("Delete", role: .destructive) { forgetSession(session.id) }
+                            }
                         }
                     }
                 }
@@ -120,6 +134,16 @@ struct RootView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(scanError ?? "")
+        }
+        .alert("Rename Scan", isPresented: .init(
+            get: { renamingSession != nil },
+            set: { if !$0 { renamingSession = nil } }
+        )) {
+            TextField("Name", text: $renameText)
+            Button("Save") { commitRename() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Leave blank to show the scanned folder name.")
         }
     }
 
@@ -281,6 +305,29 @@ struct RootView: View {
         }
     }
 
+    /// Seed the rename buffer with the current custom name (empty if none) and open the rename alert.
+    private func beginRename(_ session: ScanSession) {
+        renameText = session.name ?? ""
+        renamingSession = session.id
+    }
+
+    private func commitRename() {
+        guard let id = renamingSession else { return }
+        let name = renameText
+        renamingSession = nil
+        Task {
+            do { try await scanService.renameSession(id, to: name) } catch { scanError = error.localizedDescription }
+        }
+    }
+
+    private func togglePin(_ session: ScanSession) {
+        Task {
+            do { try await scanService.setPinned(session.id, !session.pinned) } catch {
+                scanError = error.localizedDescription
+            }
+        }
+    }
+
     /// Scan every remembered source, tying the session to those sources' bookmark ids. `deepScan` turns
     /// on the opt-in semantic tier (F6) for this run only — it's an explicit action, never a persisted default.
     private func runScan(deepScan: Bool) {
@@ -350,11 +397,14 @@ enum SidebarItem: Hashable {
     case session(Int64)
 }
 
-/// One past scan in the history sidebar (F12). Leads with the folder(s) scanned — the memorable
-/// identity — then a relative time, then the outcome (duplicate count / "Clean" when none).
+/// One past scan in the history sidebar (F12). Leads with its title (custom name, else the folder(s)
+/// scanned — the memorable identity), then a relative time + outcome ("Clean" when none). A pin marks
+/// favorites; a "Rescan" badge flags scans whose folders changed on disk since.
 private struct SessionRow: View {
+    let title: String
+    let pinned: Bool
+    let stale: Bool
     let session: ScanSession
-    let folders: String
 
     private var outcome: String {
         session.groupsFound == 0
@@ -365,11 +415,21 @@ private struct SessionRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(folders).lineLimit(1)
+            HStack(spacing: 4) {
+                if pinned { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary) }
+                Text(title).lineLimit(1)
+                if stale {
+                    Text("Rescan")
+                        .font(.caption2.weight(.medium)).foregroundStyle(.orange)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(.orange.opacity(0.15), in: Capsule())
+                        .help("Files in this folder changed since this scan.")
+                }
+            }
             Text(session.startedAt.formatted(.relative(presentation: .named)) + " · " + outcome)
                 .font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
-        .help("Reopen this scan of \(folders)")
+        .help("Reopen this scan of \(title)")
     }
 }
 
