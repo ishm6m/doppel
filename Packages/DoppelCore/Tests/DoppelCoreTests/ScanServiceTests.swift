@@ -4,6 +4,9 @@ import IndexStore
 import XCTest
 @testable import DoppelCore
 
+/// Error a ThrowingCoordinator raises mid-scan (file-scoped to avoid a nesting-depth lint violation).
+private struct ScanBoom: Error {}
+
 /// ScanService is pure orchestration, so we drive it with a scripted stub coordinator (no real files)
 /// and assert the session, files, and groups land in an InMemoryIndexStore — the engine→store contract.
 @MainActor
@@ -17,6 +20,16 @@ final class ScanServiceTests: XCTestCase {
                     cont.yield(e)
                 }
                 cont.finish()
+            }
+        }
+    }
+
+    /// Streams a few events then throws mid-scan, like an engine failure or task cancellation.
+    private struct ThrowingCoordinator: ScanCoordinating {
+        func scan(_: ScanRequest) -> AsyncThrowingStream<ScanEvent, Error> {
+            AsyncThrowingStream { cont in
+                cont.yield(.discovered(total: 3))
+                cont.finish(throwing: ScanBoom())
             }
         }
     }
@@ -129,6 +142,25 @@ final class ScanServiceTests: XCTestCase {
         let session = try await store.sessions().first { $0.id == sessionID }
         XCTAssertEqual(session?.state, .cancelled)
         XCTAssertTrue(svc.groups.isEmpty)
+    }
+
+    /// Regression: a scan that throws must finalize its session as `.failed`, never leave it stranded as
+    /// `.running` — a stranded row is what showed phantom scans in a fresh install's history. The failed
+    /// scan is also excluded from `sessions` (history), so it never surfaces in the sidebar.
+    func testThrownScanFinalizesFailedAndStaysOutOfHistory() async throws {
+        let store = InMemoryIndexStore()
+        let svc = ScanService(coordinator: ThrowingCoordinator(), store: store)
+
+        do {
+            _ = try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")]))
+            XCTFail("startScan should rethrow the coordinator's error")
+        } catch is ScanBoom {}
+
+        let persisted = try await store.sessions()
+        XCTAssertEqual(persisted.count, 1)
+        XCTAssertEqual(persisted.first?.state, .failed, "orphan session must be finalized, not left running")
+        XCTAssertNotNil(persisted.first?.finishedAt)
+        XCTAssertTrue(svc.sessions.isEmpty, "a non-terminal/failed scan is not history")
     }
 
     /// Scan history (F12): a finished scan is listed by a fresh service, and reopening it reloads the

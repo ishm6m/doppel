@@ -204,26 +204,38 @@ public final class ScanService {
 
         var final = ScanSummary()
         var state: ScanState = .finished
-        for try await event in coordinator.scan(request) {
-            switch event {
-            case let .discovered(total):
-                // Enumeration count; the bar stays indeterminate (phase nil) until the first phase tick.
-                self.total = total
-            case let .progress(phase, processed, total):
-                self.phase = phase
-                self.processed = processed
-                if let total { self.total = total }
-            case let .groupFound(group, members):
-                try await persistFoundGroup(group, members: members, sessionID: sessionID)
-            case let .fileSkipped(record, issue):
-                // Recorded, never fatal — the scan continues (T8.1 / ERROR_HANDLING.md).
-                skipped.append(SkippedFile(file: record, issue: issue))
-            case let .finished(summary):
-                final = summary
-            case let .cancelled(summary):
-                final = summary
-                state = .cancelled
+        do {
+            for try await event in coordinator.scan(request) {
+                switch event {
+                case let .discovered(total):
+                    // Enumeration count; the bar stays indeterminate (phase nil) until the first phase tick.
+                    self.total = total
+                case let .progress(phase, processed, total):
+                    self.phase = phase
+                    self.processed = processed
+                    self.total = total ?? self.total
+                case let .groupFound(group, members):
+                    try await persistFoundGroup(group, members: members, sessionID: sessionID)
+                case let .fileSkipped(record, issue):
+                    // Recorded, never fatal — the scan continues (T8.1 / ERROR_HANDLING.md).
+                    skipped.append(SkippedFile(file: record, issue: issue))
+                case let .finished(summary):
+                    final = summary
+                case let .cancelled(summary):
+                    final = summary
+                    state = .cancelled
+                }
             }
+        } catch {
+            // A thrown scan (engine error, task cancellation) must not strand the session as `running`
+            // forever — that's exactly what pollutes history with phantom scans. Finalize it as `.failed`
+            // and rethrow so the caller still sees the error.
+            try? await store.updateSession(ScanSession(
+                id: sessionID, finishedAt: .now, rootBookmarkIDs: rootBookmarkIDs,
+                scopes: request.scopes, filesDiscovered: final.filesDiscovered, state: .failed
+            ))
+            await loadSessions()
+            throw error
         }
 
         summary = final
@@ -242,8 +254,14 @@ public final class ScanService {
     }
 
     /// Loads the scan history (F12): pinned first, then newest, and refreshes staleness.
+    /// Only scans that actually completed are history. A `.running` row is either the scan happening right
+    /// now (shown live in the main pane, not the sidebar) or an orphan from a crash/force-quit; a `.failed`
+    /// row errored out with nothing reliable. Excluding both is what keeps a fresh install's history empty
+    /// — a stranded session must never masquerade as a scan the user ran.
     public func loadSessions() async {
-        sessions = await ((try? store.sessions()) ?? []).sorted(by: Self.historyOrder)
+        sessions = await ((try? store.sessions()) ?? [])
+            .filter { $0.state == .finished || $0.state == .cancelled }
+            .sorted(by: Self.historyOrder)
         recomputeStaleness()
     }
 
