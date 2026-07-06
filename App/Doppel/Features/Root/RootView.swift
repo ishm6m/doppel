@@ -62,6 +62,7 @@ struct RootView: View {
                                 session: session
                             )
                             .tag(SidebarItem.session(session.id))
+                            .help(folderTooltip(for: session))
                             .swipeActions(edge: .trailing) {
                                 Button("Delete", role: .destructive) { forgetSession(session.id) }
                             }
@@ -294,7 +295,17 @@ struct RootView: View {
             scanService.sources.first { $0.id == id }.map { URL(fileURLWithPath: $0.displayPath).lastPathComponent }
         }
         guard let first = names.first else { return "Folders" }
-        return names.count > 1 ? "\(first) +\(names.count - 1)" : first
+        let others = names.count - 1
+        return others > 0 ? "\(first) +\(others) other\(others == 1 ? "" : "s")" : first
+    }
+
+    /// Full folder paths for a scan, one per line — the hover tooltip that disambiguates same-named
+    /// folders the compact "+N others" title collapses (e.g. two "Invoices" in different places).
+    private func folderTooltip(for session: ScanSession) -> String {
+        let paths = session.rootBookmarkIDs.compactMap { id in
+            scanService.sources.first { $0.id == id }?.displayPath
+        }
+        return paths.isEmpty ? "" : paths.joined(separator: "\n")
     }
 
     /// Forget a past scan from history (files untouched). If it was the open one, fall back to Home.
