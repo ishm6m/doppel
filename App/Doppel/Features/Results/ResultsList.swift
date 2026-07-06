@@ -32,6 +32,22 @@ struct ResultsList: View {
         groups.flatMap(\.nonKeeperFileIDs)
     }
 
+    /// Groups bucketed by match tier, in cheap→fuzzy order. Empty tiers are dropped so the user only
+    /// sees kinds the scan actually found.
+    private var tieredGroups: [(tier: MatchType, groups: [DuplicateGroup])] {
+        let order: [MatchType] = [.exact, .nearText, .nearImage, .semantic]
+        return order.compactMap { tier in
+            let g = groups.filter { $0.matchType == tier }
+            return g.isEmpty ? nil : (tier, g)
+        }
+    }
+
+    /// "Identical — 2 groups · 5 files" section header for a tier bucket.
+    private func tierHeader(_ tier: MatchType, _ g: [DuplicateGroup]) -> String {
+        let files = g.reduce(0) { $0 + $1.memberFileIDs.count }
+        return "\(MatchBadge.label(tier)) — \(g.count) group\(g.count == 1 ? "" : "s") · \(files) files"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if canReview {
@@ -52,6 +68,12 @@ struct ResultsList: View {
                 )
             } else {
                 List {
+                    // At-a-glance payoff before the groups: reclaimable space (hero) + group/duplicate counts.
+                    if !groups.isEmpty {
+                        SummaryStrip(groups: groups, members: members)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 8, trailing: 12))
+                            .listRowSeparator(.hidden)
+                    }
                     // One-shot "clean it all up": pre-select every non-keeper across all groups and open
                     // the confirm sheet (which lists them + total freed) in one move. Never trashes without
                     // that confirm (golden rule 3); the keeper is always excluded. Only when we can trash
@@ -74,8 +96,17 @@ struct ResultsList: View {
                             )
                         }
                     }
-                    ForEach(groups) { group in
-                        GroupCard(group: group, members: members, selection: $selection, onCompare: onCompare, onIgnore: onIgnore)
+                    // Grouped by match tier (Identical → Almost identical → Similar → Same meaning) so the
+                    // safest, most-actionable duplicates lead and the user sees "what kind, how many" up front.
+                    ForEach(tieredGroups, id: \.tier) { bucket in
+                        Section(tierHeader(bucket.tier, bucket.groups)) {
+                            ForEach(bucket.groups) { group in
+                                GroupCard(
+                                    group: group, members: members, selection: $selection,
+                                    onCompare: onCompare, onIgnore: onIgnore
+                                )
+                            }
+                        }
                     }
                     if !skipped.isEmpty {
                         SkippedSection(skipped: skipped, onReveal: onReveal)
@@ -83,6 +114,46 @@ struct ResultsList: View {
                 }
             }
         }
+    }
+}
+
+/// Three-tile overview at the top of results: reclaimable space (the payoff, shown first and tinted),
+/// group count, and total duplicate files. All derived from the loaded groups — no extra plumbing.
+private struct SummaryStrip: View {
+    let groups: [DuplicateGroup]
+    let members: [Int64: FileRecord]
+
+    private var reclaimable: Int64 {
+        groups.flatMap(\.nonKeeperFileIDs).reduce(0) { $0 + (members[$1]?.sizeBytes ?? 0) }
+    }
+
+    private var duplicateCount: Int {
+        groups.reduce(0) { $0 + $1.nonKeeperFileIDs.count }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            tile(reclaimable.formatted(.byteCount(style: .file)), "Reclaimable", hero: true)
+            tile("\(groups.count)", groups.count == 1 ? "Group" : "Groups", hero: false)
+            tile("\(duplicateCount)", "Duplicate files", hero: false)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(reclaimable.formatted(.byteCount(style: .file))) reclaimable across "
+                + "\(groups.count) groups, \(duplicateCount) duplicate files."
+        )
+    }
+
+    private func tile(_ value: String, _ label: String, hero: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value)
+                .font(.title2.weight(.semibold)).monospacedDigit()
+                .foregroundStyle(hero ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+            Text(label).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -238,6 +309,18 @@ private struct GroupCard: View {
         group.nonKeeperFileIDs
     }
 
+    /// The group's headline: the shared filename when every member has the same name, otherwise the
+    /// keeper's name + "+N" — far easier to scan than a generic "Identical File Contents". Falls back
+    /// to a neutral label if members somehow didn't load.
+    private var title: String {
+        let names = group.memberFileIDs.compactMap { members[$0]?.displayName }
+        guard let first = names.first else { return "Duplicate group" }
+        if Set(names).count == 1 { return first }
+        let keeperName = members[group.keeperFileID]?.displayName ?? first
+        let others = group.memberFileIDs.count - 1
+        return others > 0 ? "\(keeperName) +\(others)" : keeperName
+    }
+
     /// Space freed if every non-keeper in this group is trashed (F7 per-group reclaimable size).
     private var reclaimable: Int64 {
         nonKeeperIDs.reduce(0) { $0 + (members[$1]?.sizeBytes ?? 0) }
@@ -281,10 +364,12 @@ private struct GroupCard: View {
         .padding(.vertical, 4)
     }
 
-    /// Reason first (golden rule 4), match type + confidence demoted to a quiet secondary line.
+    /// Filename headline (easy to scan); the explanation stays as the secondary reason line so every
+    /// group still carries its plain-language "why" (golden rule 4). Badge + size demoted below that.
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(group.explanation).font(.body)
+            Text(title).font(.body.weight(.medium)).lineLimit(1).truncationMode(.middle)
+            Text(group.explanation).font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 MatchBadge(group: group)
                 Spacer()
