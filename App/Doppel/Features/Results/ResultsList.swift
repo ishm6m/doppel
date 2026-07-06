@@ -27,6 +27,11 @@ struct ResultsList: View {
         onSetKeeper != nil && onRequestTrash != nil && !groups.isEmpty
     }
 
+    /// Every duplicate across every group (keepers excluded) — the "clean it all up" selection.
+    private var allNonKeeperIDs: [Int64] {
+        groups.flatMap(\.nonKeeperFileIDs)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if canReview {
@@ -46,6 +51,20 @@ struct ResultsList: View {
                 )
             } else {
                 List {
+                    // One-shot "keep one of each, check the rest" — collapses per-group selection into a
+                    // single action. Never pre-checked (golden rule 3): the user taps it, then confirms via
+                    // the shared trash sheet. The bottom bar's Deselect reverses it.
+                    if allNonKeeperIDs.count > 1 {
+                        Button {
+                            selection = Set(allNonKeeperIDs)
+                        } label: {
+                            Label(
+                                "Select all \(allNonKeeperIDs.count) duplicates (keep starred)",
+                                systemImage: "checklist"
+                            )
+                        }
+                        .help("Checks every file except the suggested keeper in each group. Confirm before it trashes anything.")
+                    }
                     ForEach(groups) { group in
                         GroupCard(group: group, members: members, selection: $selection, onCompare: onCompare, onIgnore: onIgnore)
                     }
@@ -86,7 +105,7 @@ private struct ReviewView: View {
             )
         } else {
             let group = groups[clampedIndex]
-            let nonKeeperIDs = group.memberFileIDs.filter { $0 != group.keeperFileID }
+            let nonKeeperIDs = group.nonKeeperFileIDs
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Text("Group \(clampedIndex + 1) of \(groups.count)")
@@ -190,7 +209,7 @@ private struct GroupCard: View {
     @State private var isExpanded = false
 
     private var nonKeeperIDs: [Int64] {
-        group.memberFileIDs.filter { $0 != group.keeperFileID }
+        group.nonKeeperFileIDs
     }
 
     /// Space freed if every non-keeper in this group is trashed (F7 per-group reclaimable size).
