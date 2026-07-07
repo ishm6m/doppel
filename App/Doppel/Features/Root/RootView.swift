@@ -8,7 +8,7 @@ import SwiftUI
 /// history land in later T4.x tasks.
 struct RootView: View {
     @Environment(AppEnvironment.self) private var env
-    @State private var sidebarSelection: SidebarItem? = .sources
+    @State private var sidebarSelection: SidebarItem? = .home
     @State private var scanTask: Task<Void, Never>?
     @State private var showImporter = false
     @State private var scanError: String?
@@ -22,6 +22,11 @@ struct RootView: View {
     @State private var comparing: ComparePair?
     /// First-launch onboarding gate (F10): shown once, then persisted so it never reappears.
     @AppStorage("onboardingComplete") private var onboardingComplete = false
+    /// The session being renamed (drives the rename alert), plus its editable name buffer.
+    @State private var renamingSession: Int64?
+    @State private var renameText = ""
+    /// Gate for the "Clear History" confirmation (F12): bulk-forgets unpinned scans, never touches files.
+    @State private var showClearConfirm = false
 
     private var scanService: ScanService {
         env.scanService
@@ -45,19 +50,53 @@ struct RootView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $sidebarSelection) {
-                Section("Library") {
-                    Label("Sources", systemImage: "folder").tag(SidebarItem.sources)
-                }
-                if !scanService.sessions.isEmpty {
-                    Section("Recent Scans") {
+                Label("Home", systemImage: "house").tag(SidebarItem.home)
+                Section {
+                    if scanService.sessions.isEmpty {
+                        Text("Run a scan to see it here.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    } else {
                         ForEach(scanService.sessions) { session in
-                            SessionRow(session: session).tag(SidebarItem.session(session.id))
+                            SessionRow(
+                                title: session.name ?? folderLabel(for: session),
+                                pinned: session.pinned,
+                                stale: scanService.staleSessionIDs.contains(session.id),
+                                session: session
+                            )
+                            .tag(SidebarItem.session(session.id))
+                            .help(folderTooltip(for: session))
+                            .swipeActions(edge: .trailing) {
+                                Button("Delete", role: .destructive) { forgetSession(session.id) }
+                            }
+                            .contextMenu {
+                                Button("Rename…") { beginRename(session) }
+                                Button(session.pinned ? "Unpin" : "Pin") { togglePin(session) }
+                                Divider()
+                                Button("Delete", role: .destructive) { forgetSession(session.id) }
+                            }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Scans")
+                        Spacer()
+                        // Bulk-clear lives in a low-emphasis header menu (used rarely), and only appears
+                        // when there's something unpinned to clear — pinned scans are always kept.
+                        if scanService.sessions.contains(where: { !$0.pinned }) {
+                            Menu {
+                                Button("Clear History…", role: .destructive) { showClearConfirm = true }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                            }
+                            .menuIndicator(.hidden)
+                            .buttonStyle(.borderless)
+                            .help("Clear scan history")
                         }
                     }
                 }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 240)
-        } content: {
+        } detail: {
             content
                 .navigationTitle(AppInfo.productName)
                 .toolbar { toolbarContent }
@@ -72,7 +111,7 @@ struct RootView: View {
                 .sheet(item: $comparing) { pair in
                     CompareView(pair: pair) { await scanService.compareTexts($0, $1) }
                 }
-                .sheet(isPresented: .init(get: { !onboardingComplete }, set: { if $0 { onboardingComplete = false } })) {
+                .sheet(isPresented: .init(get: { !onboardingComplete }, set: { onboardingComplete = !$0 })) {
                     OnboardingView { chooseFolders in
                         onboardingComplete = true
                         if chooseFolders { showImporter = true }
@@ -87,8 +126,6 @@ struct RootView: View {
                         + "same-meaning rewrites the fast scan misses. It's slower and uses more energy — "
                         + "best run while plugged in. Nothing leaves your Mac.")
                 }
-        } detail: {
-            InspectorPlaceholder()
         }
         .task {
             // Re-resolve remembered folders so they're scannable without re-prompting (T4.2), and
@@ -118,9 +155,45 @@ struct RootView: View {
         } message: {
             Text(scanError ?? "")
         }
+        .alert("Rename Scan", isPresented: .init(
+            get: { renamingSession != nil },
+            set: { if !$0 { renamingSession = nil } }
+        )) {
+            TextField("Name", text: $renameText)
+            Button("Save") { commitRename() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Leave blank to show the scanned folder name.")
+        }
+        .confirmationDialog("Clear scan history?", isPresented: $showClearConfirm, titleVisibility: .visible) {
+            Button("Clear History", role: .destructive) { clearHistory() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes your past scans from the list. Pinned scans are kept. "
+                + "Your files are not touched — nothing is deleted from disk.")
+        }
     }
 
-    @ViewBuilder private var content: some View {
+    /// One continuous pane with a fixed hierarchy: a persistent header (Add Folders + Scan) pinned
+    /// directly under the toolbar, a divider, and a content region that always fills the rest. Only
+    /// `bodyRegion`'s empty states center themselves — the header never moves between states.
+    private var content: some View {
+        VStack(spacing: 0) {
+            HomeHeader(
+                isScanning: isScanning,
+                canScan: !scanService.sources.isEmpty,
+                onAdd: { showImporter = true },
+                onScan: scanSources
+            )
+            Divider()
+            bodyRegion
+                // Pin the header top-down: the region owns all remaining height, so a centered
+                // empty state centers inside *this*, never dragging the header to the middle.
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder private var bodyRegion: some View {
         if isScanning {
             ScanProgressView(
                 phase: scanService.phase,
@@ -146,23 +219,29 @@ struct RootView: View {
                     selection: $selection,
                     onCompare: compare,
                     onIgnore: ignoreGroup,
-                    onReveal: revealInFinder
+                    onReveal: revealInFinder,
+                    onSetKeeper: setKeeper,
+                    onRequestTrash: { showTrashConfirm = true }
                 )
             }
-        } else if !scanService.sources.isEmpty {
-            SourcesView(
-                sources: scanService.sources,
-                onScan: scanSources,
-                onAdd: { showImporter = true },
-                onRemove: removeSource
-            )
-        } else {
+        } else if scanService.sources.isEmpty {
+            // First run: no folders chosen yet.
             ContentUnavailableView {
                 Label("Choose folders to find duplicates", systemImage: "folder.badge.plus")
             } description: {
                 Text("Everything stays on your Mac. Nothing is ever uploaded.")
             } actions: {
                 Button("Choose Folders…") { showImporter = true }
+                    .buttonStyle(.borderedProminent)
+            }
+        } else {
+            // Folders are added but nothing scanned yet.
+            ContentUnavailableView {
+                Label("Ready to scan", systemImage: "magnifyingglass")
+            } description: {
+                Text("Scan your folders to find duplicate documents. Everything stays on your Mac.")
+            } actions: {
+                Button("Scan") { scanSources() }
                     .buttonStyle(.borderedProminent)
             }
         }
@@ -235,6 +314,71 @@ struct RootView: View {
         runScan(deepScan: false)
     }
 
+    /// The folder names a past scan covered, e.g. "Downloads" or "Downloads +2" — the human-memorable
+    /// identity of a scan (a timestamp isn't). Falls back to "Folders" if the sources are no longer remembered.
+    private func folderLabel(for session: ScanSession) -> String {
+        let names = session.rootBookmarkIDs.compactMap { id in
+            scanService.sources.first { $0.id == id }.map { URL(fileURLWithPath: $0.displayPath).lastPathComponent }
+        }
+        guard let first = names.first else { return "Folders" }
+        let others = names.count - 1
+        return others > 0 ? "\(first) +\(others) other\(others == 1 ? "" : "s")" : first
+    }
+
+    /// The scan's folder names, one per line — the hover tooltip that reveals exactly which folders the
+    /// compact "+N others" title collapses. Empty (no tooltip) for a single folder, where the label is
+    /// already the full name and a tooltip would just echo it.
+    private func folderTooltip(for session: ScanSession) -> String {
+        let names = session.rootBookmarkIDs.compactMap { id in
+            scanService.sources.first { $0.id == id }.map { URL(fileURLWithPath: $0.displayPath).lastPathComponent }
+        }
+        return names.count > 1 ? names.joined(separator: "\n") : ""
+    }
+
+    /// Forget a past scan from history (files untouched). If it was the open one, fall back to Home.
+    private func forgetSession(_ id: Int64) {
+        if sidebarSelection == .session(id) { sidebarSelection = .home }
+        Task {
+            do { try await scanService.deleteSession(id) } catch { scanError = error.localizedDescription }
+        }
+    }
+
+    /// Forget every unpinned scan at once (F12). Pinned scans survive; files are never touched — deleting
+    /// a session only drops the scan record and its groupings. If the open scan is among the cleared, fall
+    /// back to Home.
+    private func clearHistory() {
+        let doomed = scanService.sessions.filter { !$0.pinned }.map(\.id)
+        if doomed.contains(where: { sidebarSelection == .session($0) }) { sidebarSelection = .home }
+        Task {
+            for id in doomed {
+                do { try await scanService.deleteSession(id) } catch { scanError = error.localizedDescription }
+            }
+        }
+    }
+
+    /// Seed the rename buffer with the current custom name (empty if none) and open the rename alert.
+    private func beginRename(_ session: ScanSession) {
+        renameText = session.name ?? ""
+        renamingSession = session.id
+    }
+
+    private func commitRename() {
+        guard let id = renamingSession else { return }
+        let name = renameText
+        renamingSession = nil
+        Task {
+            do { try await scanService.renameSession(id, to: name) } catch { scanError = error.localizedDescription }
+        }
+    }
+
+    private func togglePin(_ session: ScanSession) {
+        Task {
+            do { try await scanService.setPinned(session.id, !session.pinned) } catch {
+                scanError = error.localizedDescription
+            }
+        }
+    }
+
     /// Scan every remembered source, tying the session to those sources' bookmark ids. `deepScan` turns
     /// on the opt-in semantic tier (F6) for this run only — it's an explicit action, never a persisted default.
     private func runScan(deepScan: Bool) {
@@ -260,12 +404,6 @@ struct RootView: View {
         }
     }
 
-    private func removeSource(_ id: Int64) {
-        Task {
-            do { try await scanService.removeSource(id: id) } catch { scanError = error.localizedDescription }
-        }
-    }
-
     private func compare(_ keeper: FileRecord, _ other: FileRecord) {
         comparing = ComparePair(keeper: keeper, other: other)
     }
@@ -273,6 +411,13 @@ struct RootView: View {
     private func ignoreGroup(_ group: DuplicateGroup) {
         Task {
             do { try await scanService.ignore(group) } catch { scanError = error.localizedDescription }
+        }
+    }
+
+    /// Guided review: keep a different file than the one the app suggested (F7).
+    private func setKeeper(_ group: DuplicateGroup, _ fileID: Int64) {
+        Task {
+            do { try await scanService.setKeeper(groupID: group.id, fileID: fileID) } catch { scanError = error.localizedDescription }
         }
     }
 
@@ -299,58 +444,32 @@ struct RootView: View {
 }
 
 enum SidebarItem: Hashable {
-    case sources
+    case home
     case session(Int64)
 }
 
-/// One past scan in the history sidebar (F12): when it ran + what it found.
-private struct SessionRow: View {
-    let session: ScanSession
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(session.startedAt.formatted(date: .abbreviated, time: .shortened))
-                .lineLimit(1)
-            Text("\(session.groupsFound) group\(session.groupsFound == 1 ? "" : "s") · "
-                + session.bytesReclaimable.formatted(.byteCount(style: .file)))
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .help("Reopen this scan")
-    }
-}
-
-/// Remembered source folders (T4.2): the list persists across launches so the user re-scans without
-/// re-picking. Add/remove here; scanning runs over all sources.
-private struct SourcesView: View {
-    let sources: [ScanService.Source]
-    let onScan: () -> Void
+/// One past scan in the history sidebar (F12). Leads with its title (custom name, else the folder(s)
+/// scanned — the memorable identity), then a relative time + outcome ("Clean" when none). A pin marks
+/// favorites; a "Rescan" badge flags scans whose folders changed on disk since.
+/// Persistent header: the primary actions only — Add Folders + Scan. Sits directly under the toolbar
+/// in every state and never moves. Folder chips were removed from the header (they dragged focus and
+/// competed with the primary actions); the folder set still persists across launches and is scanned.
+private struct HomeHeader: View {
+    let isScanning: Bool
+    let canScan: Bool
     let onAdd: () -> Void
-    let onRemove: (Int64) -> Void
+    let onScan: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            List(sources) { source in
-                HStack {
-                    Label(source.displayPath, systemImage: "folder")
-                        .truncationMode(.middle).lineLimit(1)
-                    Spacer()
-                    Button {
-                        onRemove(source.id)
-                    } label: {
-                        Image(systemName: "minus.circle")
-                    }
-                    .buttonStyle(.borderless).foregroundStyle(.secondary)
-                    .help("Forget this folder")
-                }
-            }
-            HStack {
-                Button("Add Folders…", action: onAdd)
-                Spacer()
-                Button("Scan", action: onScan)
-                    .buttonStyle(.borderedProminent)
-            }
-            .padding()
+        HStack(spacing: 8) {
+            Button("Add Folders…", systemImage: "plus", action: onAdd)
+                .disabled(isScanning)
+            Spacer()
+            Button("Scan", action: onScan)
+                .buttonStyle(.borderedProminent)
+                .disabled(isScanning || !canScan)
         }
+        .padding(.horizontal).padding(.vertical, 8)
     }
 }
 
@@ -391,7 +510,8 @@ private struct ScanProgressView: View {
                 HStack {
                     Text(label).font(.headline)
                     Spacer()
-                    Text("\(groups.count) groups · \(reclaimable.formatted(.byteCount(style: .file))) reclaimable")
+                    Text("\(groups.count) group\(groups.count == 1 ? "" : "s") · "
+                        + "\(reclaimable.formatted(.byteCount(style: .file))) reclaimable")
                         .font(.callout).foregroundStyle(.secondary).monospacedDigit()
                 }
                 // Determinate where countable (phase known + total>0); indeterminate during enumeration.
@@ -444,13 +564,6 @@ private struct TrashConfirmSheet: View {
         }
         .padding()
         .frame(width: 460)
-    }
-}
-
-private struct InspectorPlaceholder: View {
-    var body: some View {
-        Text("Select a group to see details")
-            .foregroundStyle(.secondary)
     }
 }
 

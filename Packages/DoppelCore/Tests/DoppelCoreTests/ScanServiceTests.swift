@@ -4,6 +4,9 @@ import IndexStore
 import XCTest
 @testable import DoppelCore
 
+/// Error a ThrowingCoordinator raises mid-scan (file-scoped to avoid a nesting-depth lint violation).
+private struct ScanBoom: Error {}
+
 /// ScanService is pure orchestration, so we drive it with a scripted stub coordinator (no real files)
 /// and assert the session, files, and groups land in an InMemoryIndexStore — the engine→store contract.
 @MainActor
@@ -17,6 +20,16 @@ final class ScanServiceTests: XCTestCase {
                     cont.yield(e)
                 }
                 cont.finish()
+            }
+        }
+    }
+
+    /// Streams a few events then throws mid-scan, like an engine failure or task cancellation.
+    private struct ThrowingCoordinator: ScanCoordinating {
+        func scan(_: ScanRequest) -> AsyncThrowingStream<ScanEvent, Error> {
+            AsyncThrowingStream { cont in
+                cont.yield(.discovered(total: 3))
+                cont.finish(throwing: ScanBoom())
             }
         }
     }
@@ -131,6 +144,25 @@ final class ScanServiceTests: XCTestCase {
         XCTAssertTrue(svc.groups.isEmpty)
     }
 
+    /// Regression: a scan that throws must finalize its session as `.failed`, never leave it stranded as
+    /// `.running` — a stranded row is what showed phantom scans in a fresh install's history. The failed
+    /// scan is also excluded from `sessions` (history), so it never surfaces in the sidebar.
+    func testThrownScanFinalizesFailedAndStaysOutOfHistory() async throws {
+        let store = InMemoryIndexStore()
+        let svc = ScanService(coordinator: ThrowingCoordinator(), store: store)
+
+        do {
+            _ = try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")]))
+            XCTFail("startScan should rethrow the coordinator's error")
+        } catch is ScanBoom {}
+
+        let persisted = try await store.sessions()
+        XCTAssertEqual(persisted.count, 1)
+        XCTAssertEqual(persisted.first?.state, .failed, "orphan session must be finalized, not left running")
+        XCTAssertNotNil(persisted.first?.finishedAt)
+        XCTAssertTrue(svc.sessions.isEmpty, "a non-terminal/failed scan is not history")
+    }
+
     /// Scan history (F12): a finished scan is listed by a fresh service, and reopening it reloads the
     /// persisted groups + member records into the results state.
     func testReopenSessionRestoresGroups() async throws {
@@ -186,6 +218,32 @@ final class ScanServiceTests: XCTestCase {
         let rescan = ScanService(coordinator: StubCoordinator(events: events), store: store)
         try await rescan.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]))
         XCTAssertTrue(rescan.groups.isEmpty, "ignored group does not recur")
+    }
+
+    /// Guided review keeper override (F7): the user can keep a different file than the app suggested.
+    /// setKeeper updates the live results and persists, and ignores a file that isn't in the group.
+    func testSetKeeperOverridesSuggestionAndPersists() async throws {
+        let store = InMemoryIndexStore()
+        let group = DuplicateGroup(
+            id: 0, matchType: .exact, confidence: 1.0,
+            explanation: "Identical file contents", keeperFileID: 1, memberFileIDs: [1, 2]
+        )
+        let svc = ScanService(coordinator: StubCoordinator(events: [
+            .groupFound(group, members: [file(1, "a.txt"), file(2, "b.txt")]),
+            .finished(summary: ScanSummary(filesDiscovered: 2, groupsFound: 1))
+        ]), store: store)
+        let sessionID = try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]))
+        let surfaced = try XCTUnwrap(svc.groups.first)
+        XCTAssertEqual(surfaced.keeperFileID, 1, "app's initial suggestion")
+
+        try await svc.setKeeper(groupID: surfaced.id, fileID: 2)
+        XCTAssertEqual(svc.groups.first?.keeperFileID, 2, "live results reflect the override")
+        let persisted = try await store.groups(sessionID: sessionID).first { $0.id == surfaced.id }
+        XCTAssertEqual(persisted?.keeperFileID, 2, "override persisted")
+
+        // A file that isn't a member is ignored (no-op), leaving the keeper as set.
+        try await svc.setKeeper(groupID: surfaced.id, fileID: 999)
+        XCTAssertEqual(svc.groups.first?.keeperFileID, 2)
     }
 
     /// Settings ▸ Ignore List "Reset" (F11): clearing the ignore list lets a previously-ignored group

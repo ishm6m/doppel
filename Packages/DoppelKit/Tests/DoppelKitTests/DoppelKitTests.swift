@@ -33,6 +33,20 @@ final class DoppelKitTests: XCTestCase {
         XCTAssertEqual(KeeperHeuristic.suggestKeeper(from: [old, new])?.id, 2)
     }
 
+    func testNonKeeperFileIDsExcludesKeeper() {
+        let group = DuplicateGroup(
+            id: 1,
+            matchType: .exact,
+            confidence: 1.0,
+            explanation: "identical",
+            keeperFileID: 2,
+            memberFileIDs: [1, 2, 3]
+        )
+        // Select-all-duplicates and per-group trash both build on this — the keeper must never appear.
+        XCTAssertEqual(group.nonKeeperFileIDs, [1, 3])
+        XCTAssertFalse(group.nonKeeperFileIDs.contains(group.keeperFileID))
+    }
+
     func testPairIsOrderIndependent() {
         XCTAssertEqual(Pair(2, 5), Pair(5, 2))
     }

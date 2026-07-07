@@ -29,8 +29,13 @@ public final class ScanService {
     /// Authoritative summary, set when the scan terminates.
     public private(set) var summary: ScanSummary?
 
-    /// Past scans, newest first, for the history sidebar (F12). Refreshed on demand + after each scan.
+    /// Past scans for the history sidebar (F12): pinned first, then newest. Refreshed on demand + after each scan.
     public private(set) var sessions: [ScanSession] = []
+
+    /// Sessions whose scanned folders changed on disk since the scan finished — the UI flags them "Rescan".
+    /// ponytail: folder mtime only, so it catches files added/removed/renamed at a root's top level, not
+    /// in-place edits or changes deep in subfolders. Re-walk the tree if that precision is ever needed.
+    public private(set) var staleSessionIDs: Set<Int64> = []
 
     /// A file the scan couldn't process (corrupt, unreadable, scanned-PDF-needs-OCR, …) paired with why.
     /// Surfaced as "Skipped (N)" so a bad file is never silently dropped and never fails the scan (T8.1).
@@ -199,26 +204,38 @@ public final class ScanService {
 
         var final = ScanSummary()
         var state: ScanState = .finished
-        for try await event in coordinator.scan(request) {
-            switch event {
-            case let .discovered(total):
-                // Enumeration count; the bar stays indeterminate (phase nil) until the first phase tick.
-                self.total = total
-            case let .progress(phase, processed, total):
-                self.phase = phase
-                self.processed = processed
-                if let total { self.total = total }
-            case let .groupFound(group, members):
-                try await persistFoundGroup(group, members: members, sessionID: sessionID)
-            case let .fileSkipped(record, issue):
-                // Recorded, never fatal — the scan continues (T8.1 / ERROR_HANDLING.md).
-                skipped.append(SkippedFile(file: record, issue: issue))
-            case let .finished(summary):
-                final = summary
-            case let .cancelled(summary):
-                final = summary
-                state = .cancelled
+        do {
+            for try await event in coordinator.scan(request) {
+                switch event {
+                case let .discovered(total):
+                    // Enumeration count; the bar stays indeterminate (phase nil) until the first phase tick.
+                    self.total = total
+                case let .progress(phase, processed, total):
+                    self.phase = phase
+                    self.processed = processed
+                    self.total = total ?? self.total
+                case let .groupFound(group, members):
+                    try await persistFoundGroup(group, members: members, sessionID: sessionID)
+                case let .fileSkipped(record, issue):
+                    // Recorded, never fatal — the scan continues (T8.1 / ERROR_HANDLING.md).
+                    skipped.append(SkippedFile(file: record, issue: issue))
+                case let .finished(summary):
+                    final = summary
+                case let .cancelled(summary):
+                    final = summary
+                    state = .cancelled
+                }
             }
+        } catch {
+            // A thrown scan (engine error, task cancellation) must not strand the session as `running`
+            // forever — that's exactly what pollutes history with phantom scans. Finalize it as `.failed`
+            // and rethrow so the caller still sees the error.
+            try? await store.updateSession(ScanSession(
+                id: sessionID, finishedAt: .now, rootBookmarkIDs: rootBookmarkIDs,
+                scopes: request.scopes, filesDiscovered: final.filesDiscovered, state: .failed
+            ))
+            await loadSessions()
+            throw error
         }
 
         summary = final
@@ -236,9 +253,62 @@ public final class ScanService {
         return sessionID
     }
 
-    /// Loads the scan history, newest first (F12).
+    /// Loads the scan history (F12): pinned first, then newest, and refreshes staleness.
+    /// Only scans that actually completed are history. A `.running` row is either the scan happening right
+    /// now (shown live in the main pane, not the sidebar) or an orphan from a crash/force-quit; a `.failed`
+    /// row errored out with nothing reliable. Excluding both is what keeps a fresh install's history empty
+    /// — a stranded session must never masquerade as a scan the user ran.
     public func loadSessions() async {
-        sessions = await ((try? store.sessions()) ?? []).sorted { $0.startedAt > $1.startedAt }
+        sessions = await ((try? store.sessions()) ?? [])
+            .filter { $0.state == .finished || $0.state == .cancelled }
+            .sorted(by: Self.historyOrder)
+        recomputeStaleness()
+    }
+
+    /// Pinned before unpinned, then newest first.
+    private static func historyOrder(_ a: ScanSession, _ b: ScanSession) -> Bool {
+        a.pinned == b.pinned ? a.startedAt > b.startedAt : a.pinned
+    }
+
+    /// Flags sessions whose source folders' top-level contents changed since the scan finished. See the
+    /// `staleSessionIDs` note for the mtime-only ceiling. Cheap: one stat per remembered root.
+    private func recomputeStaleness() {
+        var stale: Set<Int64> = []
+        for session in sessions {
+            guard let finished = session.finishedAt else { continue }
+            for bid in session.rootBookmarkIDs {
+                guard let url = sources.first(where: { $0.id == bid })?.url,
+                      let mod = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                      mod > finished else { continue }
+                stale.insert(session.id)
+                break
+            }
+        }
+        staleSessionIDs = stale
+    }
+
+    /// Forgets a past scan from history. Files are untouched; only the scan record + its groups go.
+    public func deleteSession(_ id: Int64) async throws {
+        try await store.deleteSession(id: id)
+        sessions.removeAll { $0.id == id }
+        staleSessionIDs.remove(id)
+    }
+
+    /// Renames a past scan (nil/blank clears back to the folder label). Persists and re-sorts live.
+    public func renameSession(_ id: Int64, to name: String?) async throws {
+        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        sessions[idx].name = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        try await store.updateSession(sessions[idx])
+        sessions.sort(by: Self.historyOrder)
+    }
+
+    /// Pins/unpins a past scan. Persists and re-sorts live (pinned float to the top).
+    public func setPinned(_ id: Int64, _ pinned: Bool) async throws {
+        guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[idx].pinned = pinned
+        try await store.updateSession(sessions[idx])
+        sessions.sort(by: Self.historyOrder)
     }
 
     /// Reopens a past scan: loads its groups + member records into the live results state so the same
@@ -400,6 +470,16 @@ public final class ScanService {
         }
         if group.id != 0 { try await store.ignoreGroup(group.id) }
         groups.removeAll { $0.id == group.id }
+    }
+
+    /// Overrides the suggested keeper for a group (guided review lets the user correct the app's pick
+    /// before trashing the rest). Persists via the store and updates the live `groups` so the UI reflects
+    /// it at once. No-op if the group isn't in the current results or `fileID` isn't one of its members.
+    public func setKeeper(groupID: Int64, fileID: Int64) async throws {
+        guard let idx = groups.firstIndex(where: { $0.id == groupID }),
+              groups[idx].memberFileIDs.contains(fileID) else { return }
+        try await store.setKeeper(groupID: groupID, fileID: fileID)
+        groups[idx].keeperFileID = fileID
     }
 
     /// How many not-duplicate pairs are remembered (Settings ▸ Ignore List).
