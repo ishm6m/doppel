@@ -36,10 +36,7 @@ export default function Home() {
           <p className="fineprint">Free &amp; open source · macOS 14 Sonoma or later · 100% offline</p>
 
           <div className="device">
-            <div className="shot">
-              <span>App screenshot — Results window</span>
-              <small>Placeholder. Drop a capture of the three-column results view here (assets/shot-results.png).</small>
-            </div>
+            <img src={`${BASE}/assets/shot-empty.png`} alt="Doppel ready to scan — everything stays on your Mac, nothing is ever uploaded" width="1600" height="1148" />
           </div>
         </div>
       </header>
@@ -58,7 +55,7 @@ export default function Home() {
               <p>Doppel reads text, PDFs, and Office documents, then compares meaning — not filenames. It surfaces near-duplicates a hash-only tool would miss entirely.</p>
             </div>
             <div className="media">
-              <div className="shot"><span>Compare view</span><small>Side-by-side word diff (assets/shot-compare.png)</small></div>
+              <img src={`${BASE}/assets/shot-review.png`} alt="Reviewing one group — two versions of the same paper, flagged identical" width="1600" height="1148" />
             </div>
           </div>
 
@@ -68,7 +65,7 @@ export default function Home() {
               <p>No black boxes. Each group tells you <em>why</em> it&apos;s a match and how confident it is — “same contract, changed date” — with a clear confidence score you can trust.</p>
             </div>
             <div className="media">
-              <div className="shot"><span>Group card</span><small>Reason + confidence badge (assets/shot-group.png)</small></div>
+              <img src={`${BASE}/assets/shot-results.png`} alt="Results list — every group labelled with why it matched and how much space it frees" width="1600" height="1148" />
             </div>
           </div>
 
@@ -78,7 +75,7 @@ export default function Home() {
               <p>Doppel never destroys anything. It <em>suggests</em> a keeper; you confirm. Everything goes to the Trash, and a single ⌘Z brings it right back.</p>
             </div>
             <div className="media">
-              <div className="shot"><span>Confirmation sheet</span><small>Multi-select + select-all-but-keeper (assets/shot-delete.png)</small></div>
+              <img src={`${BASE}/assets/shot-delete.png`} alt="Confirmation sheet — review exactly what moves to the Trash before anything happens" width="1600" height="1148" />
             </div>
           </div>
         </div>
