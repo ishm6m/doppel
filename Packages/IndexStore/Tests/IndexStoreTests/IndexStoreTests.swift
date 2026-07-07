@@ -116,6 +116,31 @@ private func assertStoreBehavior(_ store: any IndexStoring) async throws {
     try await store.ignorePair(21, 11)
     let ignoredPairs = try await store.ignoredPairs()
     XCTAssertTrue(ignoredPairs.contains(Pair(11, 21)))
+
+    try await assertSessionNamePinDelete(store, ssid: ssid)
+}
+
+/// Session history management: name/pin default off, round-trip through updateSession, and delete forgets
+/// the session + cascades its groups while the scanned files (id 11) persist.
+private func assertSessionNamePinDelete(_ store: any IndexStoring, ssid: Int64) async throws {
+    let session = try await store.sessions().first { $0.id == ssid }
+    XCTAssertNil(session?.name) // no custom name by default
+    XCTAssertEqual(session?.pinned, false)
+    var renamed = try XCTUnwrap(session)
+    renamed.name = "Q3 Contracts"
+    renamed.pinned = true
+    try await store.updateSession(renamed)
+    let reloaded = try await store.sessions().first { $0.id == ssid }
+    XCTAssertEqual(reloaded?.name, "Q3 Contracts")
+    XCTAssertEqual(reloaded?.pinned, true)
+
+    try await store.deleteSession(id: ssid)
+    let remainingSessions = try await store.sessions()
+    let cascadedGroups = try await store.groups(sessionID: ssid)
+    let survivingFile = try await store.file(id: 11)
+    XCTAssertFalse(remainingSessions.contains { $0.id == ssid })
+    XCTAssertTrue(cascadedGroups.isEmpty)
+    XCTAssertNotNil(survivingFile, "files outlive their scan session")
 }
 
 /// Regression: removing a source whose file is a group's keeper must not trip the keeper FK

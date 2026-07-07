@@ -36,4 +36,7 @@ public protocol IndexStoring: Sendable {
     func createSession(_ session: ScanSession) async throws -> Int64
     func updateSession(_ session: ScanSession) async throws
     func sessions() async throws -> [ScanSession]
+    /// Forget a past scan. Its groups/members/edges cascade away; the scanned files persist
+    /// (they belong to sources, not sessions).
+    func deleteSession(id: Int64) async throws
 }

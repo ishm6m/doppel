@@ -176,7 +176,9 @@ public actor InMemoryIndexStore: IndexStoring {
             filesDiscovered: session.filesDiscovered,
             groupsFound: session.groupsFound,
             bytesReclaimable: session.bytesReclaimable,
-            state: session.state
+            state: session.state,
+            name: session.name,
+            pinned: session.pinned
         )
         return id
     }
@@ -187,5 +189,12 @@ public actor InMemoryIndexStore: IndexStoring {
 
     public func sessions() async throws -> [ScanSession] {
         Array(sessionsByID.values).sorted { $0.id < $1.id }
+    }
+
+    public func deleteSession(id: Int64) async throws {
+        sessionsByID[id] = nil
+        for (gid, stored) in groupsByID where stored.sessionID == id {
+            groupsByID[gid] = nil
+        }
     }
 }
