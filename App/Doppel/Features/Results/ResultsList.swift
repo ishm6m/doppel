@@ -326,7 +326,9 @@ private struct GroupCard: View {
         group.nonKeeperFileIDs
     }
 
-    private var title: String { groupTitle(group, members) }
+    private var title: String {
+        groupTitle(group, members)
+    }
 
     /// Space freed if every non-keeper in this group is trashed (F7 per-group reclaimable size).
     private var reclaimable: Int64 {
