@@ -95,11 +95,18 @@ h3 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
 
 /* device screenshot */
 .device {
-  max-width: 900px; margin: 56px auto 0;
+  max-width: 960px; margin: 56px auto 0;
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: 0 30px 70px rgba(0,0,0,0.22);
   border: 1px solid var(--hairline);
+}
+.device img { display: block; width: 100%; height: auto; }
+.feature-row .media img {
+  display: block; width: 100%; height: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.16);
 }
 
 /* ---------- Placeholder screenshots ---------- */
