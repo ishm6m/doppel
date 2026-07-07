@@ -46,13 +46,17 @@ Nothing is ever deleted — files go to the Trash, always undoable. Deep dive: [
 
 ## Screens
 
-<table>
-  <tr>
-    <td width="33%"><img src="docs/assets/shot-empty.png" alt="Everything stays on your Mac"><br><sub><b>Point it at your folders.</b> Everything stays on your Mac — nothing is ever uploaded.</sub></td>
-    <td width="33%"><img src="docs/assets/shot-review.png" alt="Review one group at a time"><br><sub><b>Review, one group at a time.</b> Two versions of the same paper, flagged identical — keep the star, trash the rest.</sub></td>
-    <td width="33%"><img src="docs/assets/shot-delete.png" alt="Confirm before anything moves to Trash"><br><sub><b>Nothing goes without a yes.</b> See exactly what moves to the Trash — restore any of it later.</sub></td>
-  </tr>
-</table>
+<b>Point it at your folders.</b> Everything stays on your Mac — nothing is ever uploaded.
+
+<p align="center"><img src="docs/assets/shot-empty.png" alt="Everything stays on your Mac" width="820"></p>
+
+<b>Review, one group at a time.</b> Two versions of the same paper, flagged identical — keep the star, trash the rest.
+
+<p align="center"><img src="docs/assets/shot-review.png" alt="Review one group at a time" width="820"></p>
+
+<b>Nothing goes without a yes.</b> See exactly what moves to the Trash — restore any of it later.
+
+<p align="center"><img src="docs/assets/shot-delete.png" alt="Confirm before anything moves to Trash" width="820"></p>
 
 Documents today (text · PDF · <code>.docx</code> · <code>.xlsx</code>) — images are next. Every group tells you **why** it matched and how much space you'd reclaim.
 
