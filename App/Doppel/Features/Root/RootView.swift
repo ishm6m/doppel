@@ -180,9 +180,11 @@ struct RootView: View {
     private var content: some View {
         VStack(spacing: 0) {
             HomeHeader(
+                sources: scanService.sources,
                 isScanning: isScanning,
                 canScan: !scanService.sources.isEmpty,
                 onAdd: { showImporter = true },
+                onRemove: removeSource,
                 onScan: scanSources
             )
             Divider()
@@ -235,13 +237,14 @@ struct RootView: View {
                     .buttonStyle(.borderedProminent)
             }
         } else {
-            // Folders are added but nothing scanned yet.
+            // Folders are remembered but nothing scanned yet. Scan lives in the header (the single
+            // primary action); the middle offers folder management so it never duplicates that button.
             ContentUnavailableView {
                 Label("Ready to scan", systemImage: "magnifyingglass")
             } description: {
-                Text("Scan your folders to find duplicate documents. Everything stays on your Mac.")
+                Text("Press Scan above to find duplicate documents, or add more folders first. Everything stays on your Mac.")
             } actions: {
-                Button("Scan") { scanSources() }
+                Button("Add Folders…") { showImporter = true }
                     .buttonStyle(.borderedProminent)
             }
         }
@@ -408,6 +411,14 @@ struct RootView: View {
         comparing = ComparePair(keeper: keeper, other: other)
     }
 
+    /// Drop a remembered folder (files untouched). Emptying the list returns the pane to the
+    /// "Choose folders" CTA via `canScan`.
+    private func removeSource(_ id: Int64) {
+        Task {
+            do { try await scanService.removeSource(id: id) } catch { scanError = error.localizedDescription }
+        }
+    }
+
     private func ignoreGroup(_ group: DuplicateGroup) {
         Task {
             do { try await scanService.ignore(group) } catch { scanError = error.localizedDescription }
@@ -446,31 +457,6 @@ struct RootView: View {
 enum SidebarItem: Hashable {
     case home
     case session(Int64)
-}
-
-/// One past scan in the history sidebar (F12). Leads with its title (custom name, else the folder(s)
-/// scanned — the memorable identity), then a relative time + outcome ("Clean" when none). A pin marks
-/// favorites; a "Rescan" badge flags scans whose folders changed on disk since.
-/// Persistent header: the primary actions only — Add Folders + Scan. Sits directly under the toolbar
-/// in every state and never moves. Folder chips were removed from the header (they dragged focus and
-/// competed with the primary actions); the folder set still persists across launches and is scanned.
-private struct HomeHeader: View {
-    let isScanning: Bool
-    let canScan: Bool
-    let onAdd: () -> Void
-    let onScan: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Button("Add Folders…", systemImage: "plus", action: onAdd)
-                .disabled(isScanning)
-            Spacer()
-            Button("Scan", action: onScan)
-                .buttonStyle(.borderedProminent)
-                .disabled(isScanning || !canScan)
-        }
-        .padding(.horizontal).padding(.vertical, 8)
-    }
 }
 
 /// Live scan header + groups as they arrive (UI_SPEC.md §5, F2). Determinate bar with a phase/count
