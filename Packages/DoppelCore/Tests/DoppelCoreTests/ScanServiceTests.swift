@@ -389,10 +389,15 @@ final class ScanServiceTests: XCTestCase {
     func testRemoveSourceThenRescanKeepsFKValid() async throws {
         let store = try GRDBIndexStore(inMemory: true)
         let encode: @Sendable (URL) throws -> Data = { Data($0.path.utf8) }
-        let decode: @Sendable (Data) throws -> URL = { URL(fileURLWithPath: String(bytes: $0, encoding: .utf8) ?? "") }
+        let decode: @Sendable (URL) -> URL = { $0 }
 
         func makeSvc(_ events: [ScanEvent]) -> ScanService {
-            ScanService(coordinator: StubCoordinator(events: events), store: store, makeBookmark: encode, openBookmark: decode)
+            ScanService(
+                coordinator: StubCoordinator(events: events),
+                store: store,
+                makeBookmark: encode,
+                openBookmark: { decode(URL(fileURLWithPath: String(bytes: $0, encoding: .utf8) ?? "")) }
+            )
         }
 
         // Add two folders like the picker does.
@@ -437,6 +442,57 @@ final class ScanServiceTests: XCTestCase {
             rootBookmarkIDs: svc2.sources.map(\.id)
         )
         XCTAssertEqual(svc2.groups.count, 1)
+    }
+
+    /// Fail-safe (real SQLite, FKs enforced): if a group member carries a root index with no matching
+    /// live source id, the group is dropped rather than persisted with a dangling FK that would crash the
+    /// whole scan. The scan still completes; the bad group just doesn't land.
+    func testGroupWithUnmappableRootIndexIsDroppedNotCrashing() async throws {
+        let store = try GRDBIndexStore(inMemory: true)
+        let sid = try await store.addSource(SourceBookmark(id: 0, bookmarkData: Data(), displayPath: "/tmp"))
+        // Member bookmarkID 1 is a second root index, but only one source id was supplied → unmappable.
+        var bad = file(2, "b.txt"); bad.bookmarkID = 1
+        let group = DuplicateGroup(
+            id: 0,
+            matchType: .exact,
+            confidence: 1,
+            explanation: "Identical",
+            keeperFileID: 1,
+            memberFileIDs: [1, 2]
+        )
+        let svc = ScanService(coordinator: StubCoordinator(events: [
+            .groupFound(group, members: [file(1, "a.txt"), bad]),
+            .finished(summary: ScanSummary())
+        ]), store: store)
+
+        // Must not throw a FOREIGN KEY error; the scan finishes with the bad group dropped.
+        try await svc.startScan(ScanRequest(roots: [URL(fileURLWithPath: "/tmp")], scopes: [.document]), rootBookmarkIDs: [sid])
+        XCTAssertTrue(svc.groups.isEmpty, "group with an unmappable member is skipped")
+        let saved = try await store.file(id: 1)
+        XCTAssertNil(saved, "nothing from the dropped group is persisted")
+    }
+
+    /// Removing the last source folder covering a scan also sweeps that now-orphaned session, so history
+    /// never keeps a scan whose folders are all gone.
+    func testRemoveSourceSweepsSessionsWithNoLiveFolders() async throws {
+        let store = InMemoryIndexStore()
+        let encode: @Sendable (URL) throws -> Data = { Data($0.path.utf8) }
+        let decode: @Sendable (Data) throws -> URL = { URL(fileURLWithPath: String(bytes: $0, encoding: .utf8) ?? "") }
+        let svc = ScanService(
+            coordinator: StubCoordinator(events: [.finished(summary: ScanSummary())]),
+            store: store,
+            makeBookmark: encode,
+            openBookmark: decode
+        )
+
+        let added = try await svc.addSources([URL(fileURLWithPath: "/tmp/a")])
+        try await svc.startScan(ScanRequest(roots: [added[0].url], scopes: [.document]), rootBookmarkIDs: [added[0].id])
+        XCTAssertEqual(svc.sessions.count, 1)
+
+        try await svc.removeSource(id: added[0].id)
+        XCTAssertTrue(svc.sessions.isEmpty, "the session's only folder is gone, so the session is swept")
+        let persisted = try await store.sessions()
+        XCTAssertTrue(persisted.isEmpty)
     }
 
     /// Source folders are persisted on add and re-resolved by a fresh service from the same store,
