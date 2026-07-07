@@ -1,15 +1,7 @@
-"use client";
+import CopyButton from "./CopyButton";
 
 const BASE = ""; // served at domain root on Vercel
 const BREW = "brew install --cask --no-quarantine ishm6m/doppel/doppel";
-
-function copyBrew(e) {
-  const btn = e.currentTarget;
-  navigator.clipboard.writeText(BREW).then(() => {
-    btn.textContent = "Copied";
-    setTimeout(() => (btn.textContent = "Copy"), 1500);
-  });
-}
 
 export default function Home() {
   return (
@@ -164,7 +156,7 @@ export default function Home() {
           <p className="lead" style={{ maxWidth: 520, margin: "0 auto" }}>Install with Homebrew.</p>
           <div className="code">
             <code>{BREW}</code>
-            <button onClick={copyBrew}>Copy</button>
+            <CopyButton text={BREW} />
           </div>
           <p className="note">Or download the <code>.zip</code> from <a href="https://github.com/ishm6m/doppel/releases/latest">GitHub Releases</a>.</p>
         </div>

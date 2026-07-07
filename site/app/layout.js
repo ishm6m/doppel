@@ -18,7 +18,6 @@ export const metadata = {
   authors: [{ name: "Doppel" }],
   alternates: { canonical: "/" },
   robots: { index: true, follow: true, "max-image-preview": "large" },
-  icons: { icon: "/assets/logo-light.png" },
   openGraph: {
     type: "website",
     url: SITE,
@@ -27,21 +26,12 @@ export const metadata = {
     title: "Doppel — duplicates, understood",
     description:
       "A 100% offline Mac app that finds duplicate and near-duplicate documents by their content. Open source. Nothing leaves your Mac.",
-    images: [
-      {
-        url: "/assets/og-placeholder.png",
-        width: 1200,
-        height: 630,
-        alt: "Doppel — offline duplicate finder for macOS",
-      },
-    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Doppel — duplicates, understood",
     description:
       "A 100% offline Mac app that finds duplicate and near-duplicate documents by their content. Open source. Nothing leaves your Mac.",
-    images: ["/assets/og-placeholder.png"],
   },
 };
 

@@ -3,6 +3,7 @@ import DoppelKit
 import Foundation
 import IndexStore
 import Observation
+import os
 
 /// App-layer adapter between the pure engine and the store (API.md §5, STATE_MANAGEMENT.md §5).
 /// Owns the scan session lifecycle: creates the session up front (the engine can't — it's pure and
@@ -11,6 +12,7 @@ import Observation
 @MainActor
 @Observable
 public final class ScanService {
+    private static let log = Logger(subsystem: "com.doppel.app", category: "ScanService")
     private let coordinator: any ScanCoordinating
     private let store: any IndexStoring
 
@@ -173,6 +175,18 @@ public final class ScanService {
             sourceScoped.removeAll { $0 == url }
         }
         try await store.removeSource(id: id)
+        // Sweep scans whose folders are now all gone: removeSource drops the source + its file_records,
+        // but a session keyed only to removed sources would linger showing broken paths. A session that
+        // still covers at least one live source (a multi-folder scan) is kept, as is one with no root ids
+        // (tests/legacy — nothing to reconcile).
+        let liveIDs = Set(sources.map(\.id))
+        let orphaned = sessions.filter { session in
+            !session.rootBookmarkIDs.isEmpty && !session.rootBookmarkIDs.contains(where: liveIDs.contains)
+        }
+        for session in orphaned {
+            try await store.deleteSession(id: session.id)
+        }
+        await loadSessions()
     }
 
     /// Runs a scan to completion, persisting as it goes, and returns the owning sessionID.
@@ -187,10 +201,7 @@ public final class ScanService {
             url.stopAccessingSecurityScopedResource()
         }
         currentRootBookmarkIDs = rootBookmarkIDs
-        rootURLByID = [:]
-        for (i, url) in request.roots.enumerated() {
-            rootURLByID[sourceID(forRootIndex: i)] = url
-        }
+        rootURLByID = mapRootURLsByID(request.roots)
         scopedRoots = request.roots.filter { $0.startAccessingSecurityScopedResource() }
         groups = []
         membersByID = [:]
@@ -350,10 +361,18 @@ public final class ScanService {
         if Self.isFullyIgnored(group, by: ignoredPairs) { return }
         // The engine stamps bookmarkID with a 0-based root index; translate it to the real
         // source_bookmark.id so file_record's FK holds (and path reconstruction stays keyed by that id).
-        let mapped = members.map { file -> FileRecord in
+        var mapped: [FileRecord] = []
+        for file in members {
+            guard let sid = sourceID(forRootIndex: Int(file.bookmarkID)) else {
+                // Fail safe: a root index with no live source means a corrupt scan state. Drop the whole
+                // group rather than write a dangling foreign key that would crash the entire scan. This
+                // never happens on the happy path (runScan aligns roots ↔ ids); the guard is the backstop.
+                Self.log.error("Dropping group: file references unknown root index \(file.bookmarkID, privacy: .public)")
+                return
+            }
             var f = file
-            f.bookmarkID = sourceID(forRootIndex: Int(file.bookmarkID))
-            return f
+            f.bookmarkID = sid
+            mapped.append(f)
         }
         // ponytail: persist the group's members + the group. We do NOT persist a full file inventory —
         // the engine only emits grouped/skipped files, which is all the results UI needs.
@@ -368,10 +387,21 @@ public final class ScanService {
         }
     }
 
-    /// Real source_bookmark.id for a 0-based root index. Falls back to the index itself when no ids were
-    /// supplied (tests), so the in-memory store — which enforces no FK — keeps working unchanged.
-    private func sourceID(forRootIndex i: Int) -> Int64 {
-        currentRootBookmarkIDs.indices.contains(i) ? currentRootBookmarkIDs[i] : Int64(i)
+    /// Real source_bookmark.id for a 0-based root index. When ids were supplied (production), an index
+    /// outside them is a corrupt state → nil, so the caller drops the file instead of writing a bogus FK.
+    /// When none were supplied (tests, FK-less in-memory store), the index doubles as the id.
+    private func sourceID(forRootIndex i: Int) -> Int64? {
+        if currentRootBookmarkIDs.isEmpty { return Int64(i) }
+        return currentRootBookmarkIDs.indices.contains(i) ? currentRootBookmarkIDs[i] : nil
+    }
+
+    /// Root URLs keyed by their real source_bookmark.id, for path reconstruction of persisted files.
+    private func mapRootURLsByID(_ roots: [URL]) -> [Int64: URL] {
+        var map: [Int64: URL] = [:]
+        for (i, url) in roots.enumerated() {
+            if let sid = sourceID(forRootIndex: i) { map[sid] = url }
+        }
+        return map
     }
 
     /// On-disk URL for a member file, rebuilt from its source root + relative path.
